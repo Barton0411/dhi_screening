@@ -1,0 +1,412 @@
+# 系统环境配置
+system:
+  os_commands:
+    windows:
+      command_separator: ";"
+      shell: "powershell.exe"
+      cd_and_run: "cd /d/projects/protein_screening; python main.py"
+    linux:
+      command_separator: "&&"
+      shell: "/bin/bash"
+      cd_and_run: "cd /d:/projects/protein_screening && python main.py"
+    macos:
+      command_separator: "&&"
+      shell: "/bin/zsh"
+      cd_and_run: "cd /d:/projects/protein_screening && python main.py"
+
+# 上传文件与解析规则
+file_ingest:
+  accept_extensions: [".zip", ".xlsx", ".xls"]
+  name_regex: "^\\d+\\((\\d{4}-\\d{2})\\).+\\.zip$"
+  unknown_date_action: "prompt"
+  # 支持多种可能的内部目标文件名（按优先级排序）
+  internal_targets: [
+    "04-2综合测定结果表.xlsx",
+    "04-2综合测定结果表.xls", 
+    "04综合测定结果表.xlsx",
+    "04综合测定结果表.xls",
+    "综合测定结果表.xlsx",
+    "综合测定结果表.xls"
+  ]
+  # 需要排除的文件名（不处理的文件）
+  excluded_files: [
+    "乳房感染统计.xlsx",
+    "乳房感染统计.xls",
+    "乳房炎统计.xlsx", 
+    "乳房炎统计.xls",
+    "奶牛乳房炎检测统计表.xlsx",
+    "奶牛乳房炎检测统计表.xls",
+    "统计表.xlsx",
+    "统计表.xls"
+  ]
+  # 老版本兼容
+  legacy_support:
+    max_header_search_rows: 15  # 最多搜索前15行寻找表头
+    # 新版本表头识别关键字（包含管理号）
+    new_version_indicators: ["管理号", "胎次", "采样日期", "蛋白率"]
+    # 老版本表头识别关键字（包含牛号）
+    old_version_indicators: ["牛号", "胎次", "采样日期", "蛋白率"]
+    # 通用必须字段（至少需要匹配的核心字段）
+    core_indicators: ["胎次", "采样日期", "蛋白率"]
+    summary_row_keywords: ["小计", "平均与总计", "合计", "总计", "平均"]  # 需要过滤的汇总行关键字
+  batch_mode: true  # 支持批量上传
+  max_files_per_batch: 50
+  date_detection_mode: "from_data"  # 从数据中的采样日期检测
+  recursive_search: true  # 递归搜索ZIP包内的所有文件夹
+
+# 字段映射（中文列名 → 英文字段）- 包含新老版本兼容
+field_map:
+  牛场编号: farm_id
+  管理号: management_id
+  牛号: management_id  # 老版本兼容
+  胎次(胎): parity
+  胎次: parity  # 老版本可能没有括号
+  采样日期: sample_date
+  蛋白率(%): protein_pct
+  蛋白率: protein_pct  # 老版本可能没有括号
+  泌乳天数(天): lactation_days
+  泌乳天数: lactation_days  # 老版本可能没有括号
+  产奶量(Kg): milk_yield
+  产奶量: milk_yield  # 老版本可能没有括号
+  # 添加其他性状字段映射
+  体细胞数(万/ml): somatic_cell_count
+  体细胞数: somatic_cell_count
+  脂肪率(%): fat_pct
+  脂肪率: fat_pct
+  乳糖率(%): lactose_pct
+  乳糖率: lactose_pct
+  固形物(%): solids_pct
+  固形物: solids_pct
+  脂蛋比: fat_protein_ratio
+  尿素氮(mg/dl): urea_nitrogen
+  尿素氮: urea_nitrogen
+  总乳脂(%): total_fat_pct
+  总乳脂: total_fat_pct
+  总蛋白(%): total_protein_pct
+  总蛋白: total_protein_pct
+  成年当量(Kg): mature_equivalent
+  成年当量: mature_equivalent
+  体细胞评分: somatic_cell_score
+  冰点: freezing_point
+  细菌总数: total_bacterial_count
+  干物质采食量: dry_matter_intake
+  泌乳净能: net_energy_lactation
+  代谢蛋白: metabolizable_protein
+  粗蛋白: crude_protein
+  中性洗涤纤维: neutral_detergent_fiber
+  酸性洗涤纤维: acid_detergent_fiber
+  淀粉: starch
+  粗脂肪: ether_extract
+  灰分: ash
+  钙: calcium
+  磷: phosphorus
+  镁: magnesium
+  钠: sodium
+  钾: potassium
+  硫: sulfur
+
+# 筛查条件定义 - 扩展版本，支持多种筛选项目
+filters:
+  # 固定筛选范围
+  farm_id:
+    field: farm_id
+    enabled: true
+    required: true
+    chinese_name: "牛场编号"
+    
+  parity:
+    field: parity
+    enabled: true
+    required: true
+    min: 1
+    max: 8
+    chinese_name: "胎次"
+    
+  date_range:
+    field: sample_date
+    enabled: true
+    required: true
+    default_start: "2025-01-01"
+    default_end: "2025-12-31"
+    chinese_name: "采样日期"
+    
+  # 蛋白率筛选（可独立启用）
+  protein_pct:
+    field: protein_pct
+    enabled: false  # 默认不启用，由界面控制
+    required: false
+    min: 3.00
+    max: 4.50
+    chinese_name: "蛋白率(%)"
+    min_match_months: 3
+    treat_empty_as_match: false
+    
+  # 体细胞数筛选（可独立启用）
+  somatic_cell_count:
+    field: somatic_cell_count
+    enabled: false  # 默认不启用，由界面控制
+    required: false
+    min: 0
+    max: 50
+    chinese_name: "体细胞数(万/ml)"
+    min_match_months: 3
+    treat_empty_as_match: false
+
+# 可选筛选项目配置
+optional_filters:
+  fat_pct:
+    field: fat_pct
+    chinese_name: "脂肪率(%)"
+    min: 2.0
+    max: 6.0
+    min_match_months: 3
+    treat_empty_as_match: false
+    
+  lactose_pct:
+    field: lactose_pct
+    chinese_name: "乳糖率(%)"
+    min: 4.0
+    max: 5.5
+    min_match_months: 3
+    treat_empty_as_match: false
+    
+  solids_pct:
+    field: solids_pct
+    chinese_name: "固形物(%)"
+    min: 10.0
+    max: 15.0
+    min_match_months: 3
+    treat_empty_as_match: false
+    
+  fat_protein_ratio:
+    field: fat_protein_ratio
+    chinese_name: "脂蛋比"
+    min: 1.0
+    max: 2.0
+    min_match_months: 3
+    treat_empty_as_match: false
+    
+  urea_nitrogen:
+    field: urea_nitrogen
+    chinese_name: "尿素氮(mg/dl)"
+    min: 5
+    max: 30
+    min_match_months: 3
+    treat_empty_as_match: false
+    
+  total_fat_pct:
+    field: total_fat_pct
+    chinese_name: "总乳脂(%)"
+    min: 2.0
+    max: 6.0
+    min_match_months: 3
+    treat_empty_as_match: false
+    
+  total_protein_pct:
+    field: total_protein_pct
+    chinese_name: "总蛋白(%)"
+    min: 2.5
+    max: 4.5
+    min_match_months: 3
+    treat_empty_as_match: false
+    
+  mature_equivalent:
+    field: mature_equivalent
+    chinese_name: "成年当量(Kg)"
+    min: 10
+    max: 80
+    min_match_months: 3
+    treat_empty_as_match: false
+    
+  milk_yield:
+    field: milk_yield
+    chinese_name: "产奶量(Kg)"
+    min: 10
+    max: 80
+    min_match_months: 3
+    treat_empty_as_match: false
+    
+  lactation_days:
+    field: lactation_days
+    chinese_name: "泌乳天数(天)"
+    min: 0
+    max: 500
+    min_match_months: 3
+    treat_empty_as_match: false
+    
+  somatic_cell_score:
+    field: somatic_cell_score
+    chinese_name: "体细胞评分"
+    min: 1
+    max: 9
+    min_match_months: 3
+    treat_empty_as_match: false
+    
+  freezing_point:
+    field: freezing_point
+    chinese_name: "冰点"
+    min: -0.6
+    max: -0.4
+    min_match_months: 3
+    treat_empty_as_match: false
+    
+  total_bacterial_count:
+    field: total_bacterial_count
+    chinese_name: "细菌总数"
+    min: 0
+    max: 1000000
+    min_match_months: 3
+    treat_empty_as_match: false
+    
+  dry_matter_intake:
+    field: dry_matter_intake
+    chinese_name: "干物质采食量"
+    min: 10
+    max: 40
+    min_match_months: 3
+    treat_empty_as_match: false
+    
+  net_energy_lactation:
+    field: net_energy_lactation
+    chinese_name: "泌乳净能"
+    min: 0.5
+    max: 2.5
+    min_match_months: 3
+    treat_empty_as_match: false
+    
+  metabolizable_protein:
+    field: metabolizable_protein
+    chinese_name: "代谢蛋白"
+    min: 500
+    max: 3000
+    min_match_months: 3
+    treat_empty_as_match: false
+    
+  crude_protein:
+    field: crude_protein
+    chinese_name: "粗蛋白"
+    min: 10
+    max: 25
+    min_match_months: 3
+    treat_empty_as_match: false
+    
+  neutral_detergent_fiber:
+    field: neutral_detergent_fiber
+    chinese_name: "中性洗涤纤维"
+    min: 20
+    max: 60
+    min_match_months: 3
+    treat_empty_as_match: false
+    
+  acid_detergent_fiber:
+    field: acid_detergent_fiber
+    chinese_name: "酸性洗涤纤维"
+    min: 15
+    max: 40
+    min_match_months: 3
+    treat_empty_as_match: false
+    
+  starch:
+    field: starch
+    chinese_name: "淀粉"
+    min: 10
+    max: 40
+    min_match_months: 3
+    treat_empty_as_match: false
+    
+  ether_extract:
+    field: ether_extract
+    chinese_name: "粗脂肪"
+    min: 2
+    max: 8
+    min_match_months: 3
+    treat_empty_as_match: false
+    
+  ash:
+    field: ash
+    chinese_name: "灰分"
+    min: 5
+    max: 15
+    min_match_months: 3
+    treat_empty_as_match: false
+    
+  calcium:
+    field: calcium
+    chinese_name: "钙"
+    min: 0.5
+    max: 2.0
+    min_match_months: 3
+    treat_empty_as_match: false
+    
+  phosphorus:
+    field: phosphorus
+    chinese_name: "磷"
+    min: 0.3
+    max: 1.0
+    min_match_months: 3
+    treat_empty_as_match: false
+    
+  magnesium:
+    field: magnesium
+    chinese_name: "镁"
+    min: 0.1
+    max: 0.5
+    min_match_months: 3
+    treat_empty_as_match: false
+    
+  sodium:
+    field: sodium
+    chinese_name: "钠"
+    min: 0.1
+    max: 1.0
+    min_match_months: 3
+    treat_empty_as_match: false
+    
+  potassium:
+    field: potassium
+    chinese_name: "钾"
+    min: 0.5
+    max: 2.0
+    min_match_months: 3
+    treat_empty_as_match: false
+    
+  sulfur:
+    field: sulfur
+    chinese_name: "硫"
+    min: 0.1
+    max: 0.5
+    min_match_months: 3
+    treat_empty_as_match: false
+
+# 批量筛选逻辑 - 新逻辑：X个月符合即可
+batch_filtering:
+  mode: "partial_month_match"  # 部分月份匹配模式
+  logic: "x_months_match"  # X个月符合即可
+  base_grouping: ["farm_id", "management_id", "parity"]  # 基础分组字段
+  min_match_months: 3  # 默认最少3个月符合
+  max_months_range: 12  # 最大月份范围
+
+# 导出结果表 - 动态配置版本
+export:
+  file_name: "DHI月度筛选结果_{date}.xlsx"
+  format: "monthly_multi_trait_report"  # 多性状月度报告格式
+  base_columns:
+    - farm_id
+    - management_id
+    - parity
+  # 月度字段将根据启用的筛选项动态确定
+  dynamic_monthly_fields: true
+  # 固定的特殊列
+  special_columns:
+    - last_month_lactation_days  # 最后一个月的泌乳天数（如果有泌乳天数数据）
+    - last_sample_date  # 最后一次采样日
+    - future_lactation_days  # 未来泌乳天数（如果启用）
+  # 动态特殊列（根据启用的筛选项添加）
+  conditional_special_columns:
+    protein_pct: "平均蛋白率(%)"  # 仅当启用蛋白率筛选时添加
+  calculation_notes: |
+    计算方法说明：
+    1. 个体平均值采用产奶量加权平均（对于有产奶量的性状）
+    2. 月度平均值为该月所有牛的平均值
+    3. 总体平均值为所有记录的加权平均值
+    4. 未来泌乳天数 = (计划调群日 - 最后采样日) + 最后一个月泌乳天数 

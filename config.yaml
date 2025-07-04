@@ -1,0 +1,23 @@
+app:
+  name: "奶牛蛋白筛查系统"
+  version: "1.0.0"
+  debug: true
+
+upload:
+  max_file_size: 104857600  # 100MB in bytes
+  allowed_extensions: [".zip", ".xlsx"]
+  temp_dir: "temp"  # 将由程序动态设置为用户数据目录
+  auto_cleanup: true
+
+api:
+  host: "0.0.0.0"
+  port: 8000
+  cors_origins: ["*"]
+
+export:
+  default_filename_pattern: "筛选结果表_{date}.xlsx"
+  temp_retention_hours: 24
+
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s" 

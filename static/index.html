@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>奶牛蛋白筛查系统</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="/static/style.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container-fluid">
+        <!-- 导航栏 -->
+        <nav class="navbar navbar-expand-lg navbar-dark bg-primary mb-4">
+            <div class="container">
+                <a class="navbar-brand" href="#">
+                    <i class="bi bi-clipboard-data"></i>
+                    奶牛蛋白筛查系统
+                </a>
+                <span class="navbar-text">
+                    DHI报告04-2综合测定结果表筛查工具
+                </span>
+            </div>
+        </nav>
+
+        <div class="container">
+            <!-- 警告/成功消息 -->
+            <div id="alertContainer"></div>
+
+            <!-- 步骤指示器 -->
+            <div class="row mb-4">
+                <div class="col-12">
+                    <div class="progress-steps">
+                        <div class="step active" id="step1">
+                            <div class="step-number">1</div>
+                            <div class="step-text">上传文件</div>
+                        </div>
+                        <div class="step" id="step2">
+                            <div class="step-number">2</div>
+                            <div class="step-text">设置筛选条件</div>
+                        </div>
+                        <div class="step" id="step3">
+                            <div class="step-number">3</div>
+                            <div class="step-text">下载结果</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 第一步：文件上传 -->
+            <div class="card mb-4" id="uploadSection">
+                <div class="card-header">
+                    <h5><i class="bi bi-cloud-upload"></i> 文件上传</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-8">
+                            <div class="upload-area" id="uploadArea">
+                                <div class="upload-content">
+                                    <i class="bi bi-cloud-upload upload-icon"></i>
+                                    <h6>拖拽文件到此处或点击选择</h6>
+                                    <p class="text-muted">
+                                        支持格式：ZIP压缩包或XLSX表格文件<br>
+                                        最大文件大小：100MB
+                                    </p>
+                                    <input type="file" id="fileInput" accept=".zip,.xlsx" multiple hidden>
+                                    <button class="btn btn-primary" id="selectFileBtn">
+                                        <i class="bi bi-folder-open"></i> 选择文件（支持多选）
+                                    </button>
+                                </div>
+                                <div class="upload-progress" id="uploadProgress" style="display: none;">
+                                    <div class="progress mb-2">
+                                        <div class="progress-bar" role="progressbar" style="width: 0%"></div>
+                                    </div>
+                                    <div class="upload-status">上传中...</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="upload-info">
+                                <h6>上传说明</h6>
+                                <ul class="list-unstyled">
+                                    <li><i class="bi bi-check2 text-success"></i> 支持批量上传多个文件</li>
+                                    <li><i class="bi bi-check2 text-success"></i> ZIP压缩包需包含"04-2综合测定结果表.xlsx"</li>
+                                    <li><i class="bi bi-check2 text-success"></i> 系统从采样日期自动识别时间范围</li>
+                                    <li><i class="bi bi-check2 text-success"></i> 支持跨月份筛选同一头牛的数据</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 文件列表 -->
+                    <div id="fileListSection" style="display: none;">
+                        <hr>
+                        <h6>已上传文件</h6>
+                        <div class="table-responsive">
+                            <table class="table table-sm">
+                                <thead>
+                                    <tr>
+                                        <th>
+                                            <input type="checkbox" id="selectAllFiles" class="form-check-input">
+                                            选择
+                                        </th>
+                                        <th>文件名</th>
+                                        <th>上传时间</th>
+                                        <th>检测日期</th>
+                                        <th>数据行数</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="fileList"></tbody>
+                            </table>
+                            
+                            <!-- 批量操作 -->
+                            <div class="mt-3">
+                                <button class="btn btn-success" id="batchFilterBtn" style="display: none;">
+                                    <i class="bi bi-funnel"></i> 批量筛选选中文件
+                                </button>
+                                <button class="btn btn-outline-danger ms-2" id="deleteSelectedBtn" style="display: none;">
+                                    <i class="bi bi-trash"></i> 删除选中文件
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 第二步：筛选条件设置 -->
+            <div class="card mb-4" id="filterSection" style="display: none;">
+                <div class="card-header">
+                    <h5><i class="bi bi-funnel"></i> 筛选条件设置</h5>
+                </div>
+                <div class="card-body">
+                    <form id="filterForm">
+                        <input type="hidden" id="selectedFileId">
+                        
+                        <!-- 选择筛选文件 -->
+                        <div class="row mb-4">
+                            <div class="col-12">
+                                <h6 class="text-primary">选择筛选文件</h6>
+                                <div class="border rounded p-3 bg-light">
+                                    <div id="selectedFilesInfo">
+                                        <p class="text-muted mb-0">请先选择要筛选的文件</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- 固定筛选条件 -->
+                        <div class="row mb-3">
+                            <div class="col-12">
+                                <h6 class="text-primary">固定筛选条件</h6>
+                                <p class="text-muted small">筛选范围：牛场编号、胎次、采样日期；筛选要求：蛋白率在指定范围内</p>
+                            </div>
+                        </div>
+                        
+                        <div class="row mb-3">
+                            <div class="col-md-4">
+                                <label class="form-label">日期区间</label>
+                                <div class="input-group">
+                                    <input type="date" class="form-control" id="startDate" required>
+                                    <span class="input-group-text">至</span>
+                                    <input type="date" class="form-control" id="endDate" required>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">牛场编号</label>
+                                <select class="form-select" id="farmId" multiple>
+                                    <option value="">加载中...</option>
+                                </select>
+                                <small class="text-muted">按住Ctrl/Cmd键多选</small>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">胎次范围</label>
+                                <div class="input-group">
+                                    <input type="number" class="form-control" id="parityMin" value="1" min="1" max="10">
+                                    <span class="input-group-text">-</span>
+                                    <input type="number" class="form-control" id="parityMax" value="8" min="1" max="10">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row mb-4">
+                            <div class="col-md-4">
+                                <label class="form-label">蛋白率范围 (%)</label>
+                                <div class="input-group">
+                                    <input type="number" class="form-control" id="proteinMin" value="3.00" step="0.01" min="0" max="100">
+                                    <span class="input-group-text">-</span>
+                                    <input type="number" class="form-control" id="proteinMax" value="4.50" step="0.01" min="0" max="100">
+                                </div>
+                                <div class="form-check mt-2">
+                                    <input class="form-check-input" type="checkbox" id="includeNullAsMatch">
+                                    <label class="form-check-label" for="includeNullAsMatch">
+                                        将数据为空的判定为符合
+                                    </label>
+                                </div>
+                                <small class="text-muted">勾选后，蛋白率数据为空的记录也会被认为符合筛选条件</small>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">符合条件月份数</label>
+                                <div class="input-group">
+                                    <input type="number" class="form-control" id="minMatchMonths" value="3" min="1" max="120">
+                                    <span class="input-group-text">个月</span>
+                                </div>
+                                <small class="text-muted">某头牛在X个月中符合蛋白率条件即视为合格</small>
+                                <div class="alert alert-info mt-2 p-2">
+                                    <i class="bi bi-info-circle"></i> 
+                                    <small>系统会自动处理牛只在不同月份的缺失情况，只统计有数据的月份</small>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 输出报告字段 -->
+                        <hr>
+                        <div class="row mb-3">
+                            <div class="col-12">
+                                <h6 class="text-secondary">输出报告字段</h6>
+                                <p class="text-muted small">固定格式：牛场编号、管理号、胎次、各月份蛋白率</p>
+                                <div class="alert alert-info">
+                                    <i class="bi bi-info-circle"></i> 
+                                    输出格式示例：牛场编号、管理号、胎次、2025年1月蛋白率、2025年2月蛋白率、2025年3月蛋白率...
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row mt-4">
+                            <div class="col-12">
+                                <button type="submit" class="btn btn-success btn-lg" id="applyFiltersBtn">
+                                    <i class="bi bi-filter"></i> 应用筛选条件
+                                </button>
+                                <small class="text-muted ms-3">点击应用筛选条件将使用当前设置的所有筛选参数</small>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- 第三步：结果下载 -->
+            <div class="card mb-4" id="resultSection" style="display: none;">
+                <div class="card-header">
+                    <h5><i class="bi bi-download"></i> 筛选结果</h5>
+                </div>
+                <div class="card-body">
+                    <div id="resultInfo"></div>
+                    <div id="downloadArea" style="display: none;">
+                        <hr>
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <h6>下载筛选结果</h6>
+                                <p class="text-muted mb-0">Excel格式的筛选结果文件</p>
+                            </div>
+                            <a href="#" class="btn btn-primary btn-lg" id="downloadBtn">
+                                <i class="bi bi-download"></i> 下载结果文件
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 加载指示器 -->
+    <div class="loading-overlay" id="loadingOverlay" style="display: none;">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">处理中...</span>
+        </div>
+        <div class="loading-text" id="loadingText">正在处理，请稍候...</div>
+        <div class="loading-time-info" id="loadingTimeInfo" style="margin-top: 10px; font-size: 14px; color: #6c757d;"></div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/script.js"></script>
+</body>
+</html> 

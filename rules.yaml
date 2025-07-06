@@ -409,4 +409,66 @@ export:
     1. 个体平均值采用产奶量加权平均（对于有产奶量的性状）
     2. 月度平均值为该月所有牛的平均值
     3. 总体平均值为所有记录的加权平均值
-    4. 未来泌乳天数 = (计划调群日 - 最后采样日) + 最后一个月泌乳天数 
+    4. 未来泌乳天数 = (计划调群日 - 最后采样日) + 最后一个月泌乳天数
+
+# 处置办法配置
+treatment_methods:
+  # 淘汰条件
+  cull:
+    enabled: true
+    chinese_name: "淘汰"
+    description: "严重情况，建议淘汰"
+    breeding_status: ["干奶", "禁配"]  # 繁殖状态限制
+    yield_operator: "<"  # 产奶量操作符
+    yield_value: 15  # 产奶量阈值(kg)
+    mastitis_operator: ">="  # 发病次数操作符
+    mastitis_value: 4  # 发病次数阈值
+    
+  # 禁配隔离条件
+  isolate:
+    enabled: true
+    chinese_name: "禁配隔离"
+    description: "隔离观察，禁止配种"
+    breeding_status: ["可配", "产犊"]  # 繁殖状态限制
+    yield_operator: ">="  # 产奶量操作符
+    yield_value: 15  # 产奶量阈值(kg)
+    mastitis_operator: ">="  # 发病次数操作符
+    mastitis_value: 3  # 发病次数阈值
+    lactation_operator: "<"  # 泌乳天数操作符
+    lactation_value: 200  # 泌乳天数阈值
+    
+  # 瞎乳区条件
+  blind_quarter:
+    enabled: true
+    chinese_name: "瞎乳区"
+    description: "乳区处理"
+    breeding_status: ["妊娠", "已配"]  # 繁殖状态限制
+    gestation_operator: ">="  # 在胎天数操作符
+    gestation_value: 100  # 在胎天数阈值
+    mastitis_operator: ">="  # 发病次数操作符
+    mastitis_value: 2  # 发病次数阈值
+    lactation_operator: ">="  # 泌乳天数操作符
+    lactation_value: 150  # 泌乳天数阈值
+    
+  # 提前干奶条件
+  early_dry:
+    enabled: true
+    chinese_name: "提前干奶"
+    description: "提前干奶处理"
+    breeding_status: ["妊娠"]  # 繁殖状态限制
+    gestation_operator: ">="  # 在胎天数操作符
+    gestation_value: 180  # 在胎天数阈值
+    mastitis_operator: ">="  # 发病次数操作符
+    mastitis_value: 2  # 发病次数阈值
+    lactation_operator: ">="  # 泌乳天数操作符
+    lactation_value: 200  # 泌乳天数阈值
+    
+  # 治疗条件
+  treatment:
+    enabled: true
+    chinese_name: "治疗"
+    description: "药物治疗"
+    max_mastitis_count: 2  # 最大发病次数，超过则不适合治疗
+    
+  # 默认处理
+  default_treatment: true  # 如果没有符合其他条件，默认为治疗 

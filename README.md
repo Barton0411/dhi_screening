@@ -85,51 +85,19 @@ python main.py
 2. 下载按月展开的 Excel 格式结果文件
 3. 结果格式：牛场编号、管理号、胎次、各月份数据明细
 
-## API 接口
-
-### 文件上传
-```
-POST /api/upload
-Content-Type: multipart/form-data
-```
-
-### 获取筛选条件
-```
-GET /api/filters
-```
-
-### 应用筛选
-```
-POST /api/filter
-Content-Type: application/json
-```
-
-### 下载结果
-```
-GET /api/download/{filename}
-```
-
-### 文件管理
-```
-GET /api/files          # 获取文件列表
-DELETE /api/files/{id}  # 删除文件
-```
 
 ## 文件结构
 
 ```
 protein_screening/
-├── main.py              # FastAPI 主应用
+├── main.py              # 桌面应用程序入口
+├── desktop_app.py       # PyQt6桌面应用主界面
 ├── data_processor.py    # 数据处理核心模块
 ├── models.py           # 数据模型定义
 ├── requirements.txt    # Python 依赖
 ├── config.yaml         # 系统配置
 ├── rules.yaml          # 业务规则配置
 ├── 需求说明.md         # 需求文档
-├── static/             # 静态文件
-│   ├── index.html     # 主页面
-│   ├── style.css      # 样式文件
-│   └── script.js      # 前端脚本
 ├── uploads/           # 上传文件存储
 ├── temp/              # 临时数据存储
 └── exports/           # 导出文件存储
@@ -370,7 +338,7 @@ protein_screening/
    * 未找到目标 Excel → 提示检查压缩包。
 
 ## 非功能需求
-* Web API 基于 FastAPI，接口返回 JSON。
+* 桌面应用基于 PyQt6，提供直观的图形界面。
 * 大文件上传限制 100 MB；使用临时目录做解压，完成后删除。
 * 代码需配套单元测试，覆盖率 ≥ 80 %。
 

@@ -31,7 +31,13 @@ const elements = {
     alertContainer: document.getElementById('alertContainer'),
     loadingOverlay: document.getElementById('loadingOverlay'),
     downloadBtn: document.getElementById('downloadBtn'),
-    selectedFileId: document.getElementById('selectedFileId')
+    selectedFileId: document.getElementById('selectedFileId'),
+    // 新的功能模块元素
+    mastitisScreeningForm: document.getElementById('mastitisScreeningForm'),
+    enableProteinFilter: document.getElementById('enableProteinFilter'),
+    enableSccFilter: document.getElementById('enableSccFilter'),
+    enableOtherFilters: document.getElementById('enableOtherFilters'),
+    enableLactationFilter: document.getElementById('enableLactationFilter')
 };
 
 // 浏览器关闭检测（无网络请求方案）
@@ -215,6 +221,11 @@ function initializeEventListeners() {
     
     // 筛选表单
     elements.filterForm.addEventListener('submit', handleFilterSubmit);
+    
+    // 新功能模块事件监听器
+    initializeMastitisEventListeners();
+    initializeFilterToggleListeners();
+    initializeTabSwitchListeners();
 }
 
 // 显示消息
@@ -1330,4 +1341,240 @@ document.addEventListener('DOMContentLoaded', function() {
     // 先设置基本默认值，然后尝试加载实际统计信息
     setDefaultDates();
     loadDataStatistics();
-}); 
+});
+
+// ================== 功能模块化布局支持函数 ==================
+
+// 初始化乳房炎功能模块事件监听器
+function initializeMastitisEventListeners() {
+    // 慢性乳房炎筛查表单
+    if (elements.mastitisScreeningForm) {
+        elements.mastitisScreeningForm.addEventListener('submit', handleMastitisScreeningSubmit);
+    }
+}
+
+// 初始化筛选开关监听器
+function initializeFilterToggleListeners() {
+    // 蛋白筛选开关
+    if (elements.enableProteinFilter) {
+        elements.enableProteinFilter.addEventListener('change', function() {
+            toggleFilterSection('protein', this.checked);
+        });
+    }
+    
+    // 体细胞数筛选开关
+    if (elements.enableSccFilter) {
+        elements.enableSccFilter.addEventListener('change', function() {
+            toggleFilterSection('scc', this.checked);
+        });
+    }
+    
+    // 其他筛选开关
+    if (elements.enableOtherFilters) {
+        elements.enableOtherFilters.addEventListener('change', function() {
+            toggleFilterSection('other', this.checked);
+        });
+    }
+    
+    // 泌乳天数筛选开关
+    if (elements.enableLactationFilter) {
+        elements.enableLactationFilter.addEventListener('change', function() {
+            toggleFilterSection('lactation', this.checked);
+        });
+    }
+}
+
+// 初始化标签页切换监听器
+function initializeTabSwitchListeners() {
+    // 监听标签页切换事件
+    const functionTabs = document.querySelectorAll('#functionTabs button[data-bs-toggle="pill"]');
+    functionTabs.forEach(tab => {
+        tab.addEventListener('shown.bs.tab', function (event) {
+            const targetTab = event.target.getAttribute('data-bs-target');
+            console.log('切换到标签页:', targetTab);
+            
+            // 根据当前标签页执行相应的初始化
+            switch (targetTab) {
+                case '#basic-data':
+                    // 基础数据标签页激活时的处理
+                    loadUploadedFiles();
+                    break;
+                case '#dhi-filter':
+                    // DHI筛选标签页激活时的处理
+                    loadFarmIds();
+                    break;
+                case '#mastitis-screening':
+                    // 慢性乳房炎筛查标签页激活时的处理
+                    break;
+                case '#mastitis-monitoring':
+                    // 隐形乳房炎监测标签页激活时的处理
+                    console.log('隐形乳房炎监测标签页已激活');
+                    break;
+            }
+        });
+    });
+}
+
+// 筛选条件开关控制
+function toggleFilterSection(filterType, enabled) {
+    const filterSections = {
+        'protein': document.querySelector('#enableProteinFilter').closest('.card'),
+        'scc': document.querySelector('#enableSccFilter').closest('.card'),
+        'other': document.querySelector('#enableOtherFilters').closest('.card'),
+        'lactation': document.querySelector('#enableLactationFilter').closest('.card')
+    };
+    
+    const section = filterSections[filterType];
+    if (section) {
+        const inputs = section.querySelectorAll('input, select');
+        inputs.forEach(input => {
+            if (input.type !== 'checkbox' || input.classList.contains('form-switch')) {
+                return; // 跳过开关本身
+            }
+            input.disabled = !enabled;
+        });
+        
+        // 添加视觉效果
+        if (enabled) {
+            section.classList.remove('disabled');
+        } else {
+            section.classList.add('disabled');
+        }
+    }
+}
+
+// 处理慢性乳房炎筛查表单提交
+async function handleMastitisScreeningSubmit(event) {
+    event.preventDefault();
+    
+    if (selectedFiles.length === 0) {
+        showAlert('请先选择要分析的文件', 'warning');
+        return;
+    }
+    
+    try {
+        showLoading(true);
+        document.getElementById('loadingText').textContent = '执行慢性乳房炎筛查...';
+        
+        // 收集筛查配置
+        const screeningConfig = {
+            selected_files: selectedFiles,
+            chronic_scc_threshold: parseFloat(document.getElementById('chronicSccThreshold').value),
+            chronic_month_count: parseInt(document.getElementById('chronicMonthCount').value),
+            cull_parity_min: parseInt(document.getElementById('cullParityMin').value),
+            cull_lactation_min: parseInt(document.getElementById('cullLactationMin').value),
+            isolate_yield_max: parseFloat(document.getElementById('isolateYieldMax').value),
+            isolate_infection_min: parseInt(document.getElementById('isolateInfectionMin').value),
+            blind_quarter_breeding: document.getElementById('blindQuarterBreeding').value,
+            blind_quarter_gestation_min: parseInt(document.getElementById('blindQuarterGestationMin').value),
+            blind_quarter_gestation_max: parseInt(document.getElementById('blindQuarterGestationMax').value),
+            early_dry_lactation_min: parseInt(document.getElementById('earlyDryLactationMin').value),
+            early_dry_yield_max: parseFloat(document.getElementById('earlyDryYieldMax').value),
+            treatment_default: document.getElementById('treatmentDefault').checked
+        };
+        
+        const response = await fetch(`${API_BASE}/mastitis-screening`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(screeningConfig)
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.detail || '筛查失败');
+        }
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showAlert('慢性乳房炎筛查完成', 'success');
+            displayMastitisScreeningResults(result);
+            updateStep(3);
+        } else {
+            throw new Error(result.message || '筛查失败');
+        }
+        
+    } catch (error) {
+        console.error('Mastitis screening error:', error);
+        showAlert(error.message, 'danger');
+    } finally {
+        showLoading(false);
+    }
+}
+
+// 显示慢性乳房炎筛查结果
+function displayMastitisScreeningResults(result) {
+    const resultInfo = document.getElementById('resultInfo');
+    
+    const resultsHtml = `
+        <div class="mastitis-screening-results">
+            <h6 class="mb-3"><i class="bi bi-heart-pulse text-danger"></i> 慢性乳房炎筛查结果</h6>
+            
+            <div class="screening-summary mb-4">
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="card border-danger">
+                            <div class="card-body text-center">
+                                <h5 class="card-title text-danger">${result.chronic_infected_count || 0}</h5>
+                                <p class="card-text">慢性感染牛数量</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card border-info">
+                            <div class="card-body text-center">
+                                <h5 class="card-title text-info">${result.total_screened_count || 0}</h5>
+                                <p class="card-text">总筛查牛只数</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="treatment-distribution">
+                <h6>处置方案分布</h6>
+                <div class="row">
+                    <div class="col-md-2">
+                        <div class="text-center">
+                            <div class="h5 text-danger">${result.treatment_distribution?.cull || 0}</div>
+                            <small>淘汰</small>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        <div class="text-center">
+                            <div class="h5 text-warning">${result.treatment_distribution?.isolate || 0}</div>
+                            <small>禁配隔离</small>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        <div class="text-center">
+                            <div class="h5 text-info">${result.treatment_distribution?.blind_quarter || 0}</div>
+                            <small>瞎乳区</small>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        <div class="text-center">
+                            <div class="h5 text-secondary">${result.treatment_distribution?.early_dry || 0}</div>
+                            <small>提前干奶</small>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        <div class="text-center">
+                            <div class="h5 text-success">${result.treatment_distribution?.treatment || 0}</div>
+                            <small>治疗</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    resultInfo.innerHTML = resultsHtml;
+    
+    // 显示下载区域
+    if (result.download_url) {
+        const downloadArea = document.getElementById('downloadArea');
+        downloadArea.style.display = 'block';
+        document.getElementById('downloadBtn').href = result.download_url;
+    }
+} 

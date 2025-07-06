@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (
     QTabWidget, QMessageBox, QSplitter, QHeaderView, QListWidget,
     QListWidgetItem, QFrame, QScrollArea, QMenuBar, QMenu, 
     QDialog, QDialogButtonBox, QSlider, QGridLayout,
-    QColorDialog, QInputDialog, QLineEdit
+    QColorDialog, QInputDialog, QLineEdit, QStyle
 )
 from PyQt6.QtCore import QThread, pyqtSignal, QDate, Qt, QTimer, QSettings
 from PyQt6.QtGui import QIcon, QFont, QPixmap, QColor, QAction
@@ -51,14 +51,15 @@ class DisplaySettingsDialog(QDialog):
         current_font_bold = self.settings.value("font_bold", False, type=bool)
         current_font_italic = self.settings.value("font_italic", False, type=bool)
         current_font_underline = self.settings.value("font_underline", False, type=bool)
+        current_use_system_theme = self.settings.value("use_system_theme", True, type=bool)
         
         self.init_ui(current_scale, current_font_color, current_bg_color, 
                     current_font_family, current_font_size, current_font_bold, 
-                    current_font_italic, current_font_underline)
+                    current_font_italic, current_font_underline, current_use_system_theme)
     
     def init_ui(self, current_scale, current_font_color, current_bg_color,
                 current_font_family, current_font_size, current_font_bold,
-                current_font_italic, current_font_underline):
+                current_font_italic, current_font_underline, current_use_system_theme):
         """初始化界面"""
         layout = QVBoxLayout(self)
         layout.setSpacing(15)
@@ -66,7 +67,7 @@ class DisplaySettingsDialog(QDialog):
         
         # 标题
         title_label = QLabel("界面显示设置")
-        title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #333;")
+        title_label.setStyleSheet("font-weight: bold; color: #333;")
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title_label)
         
@@ -192,6 +193,13 @@ class DisplaySettingsDialog(QDialog):
         color_group = QGroupBox("颜色设置")
         color_group.setStyleSheet("QGroupBox { font-weight: bold; color: #333; }")
         color_layout = QVBoxLayout(color_group)
+        
+        # 系统主题跟随选项
+        self.use_system_theme_cb = QCheckBox("跟随系统主题（深色/浅色模式）")
+        self.use_system_theme_cb.setChecked(current_use_system_theme)
+        self.use_system_theme_cb.setToolTip("自动适配系统的深色或浅色主题")
+        self.use_system_theme_cb.stateChanged.connect(self.on_system_theme_toggled)
+        color_layout.addWidget(self.use_system_theme_cb)
         
         # 字体颜色设置
         font_color_container = QWidget()
@@ -477,6 +485,14 @@ class DisplaySettingsDialog(QDialog):
     def get_font_underline(self):
         """获取字体下划线"""
         return self.font_underline_cb.isChecked()
+    
+    def get_use_system_theme(self):
+        """获取系统主题跟随设置"""
+        return self.use_system_theme_cb.isChecked()
+    
+    def on_system_theme_toggled(self, checked):
+        """系统主题选项变化时触发"""
+        self.update_preview()
 
     def save_settings(self):
         """保存设置"""
@@ -497,6 +513,7 @@ class DisplaySettingsDialog(QDialog):
         self.settings.setValue("font_bold", font_bold)
         self.settings.setValue("font_italic", font_italic)
         self.settings.setValue("font_underline", font_underline)
+        self.settings.setValue("use_system_theme", self.get_use_system_theme())
         self.settings.sync()
         
         return scale, font_color, bg_color, font_family, font_size, font_bold, font_italic, font_underline
@@ -1296,6 +1313,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.data_list = []  # 存储所有处理过的数据
         self.processor = DataProcessor()
+        self.data_processor = self.processor  # 为慢性乳房炎筛查功能提供别名
         self.current_results = pd.DataFrame()  # 当前筛选结果
         
         # 加载显示设置
@@ -1309,24 +1327,40 @@ class MainWindow(QMainWindow):
         self.font_italic = self.settings.value("font_italic", False, type=bool)
         self.font_underline = self.settings.value("font_underline", False, type=bool)
         
+        # 初始化筛选相关变量
+        self.added_other_filters = {}  # 存储添加的其他筛选项
+        
         self.init_ui()
         self.load_config()
     
     def get_safe_screen_info(self):
-        """安全地获取屏幕信息"""
+        """安全地获取屏幕信息 - 更准确的DPI适配"""
         screen = QApplication.primaryScreen()
         if screen is None:
             return {
                 'width': 1920,
                 'height': 1080,
-                'dpi_ratio': 1.0
+                'dpi_ratio': 1.0,
+                'logical_dpi': 96.0,
+                'physical_dpi': 96.0,
+                'scale_factor': 1.0
             }
         else:
             geometry = screen.availableGeometry()
+            logical_dpi = screen.logicalDotsPerInch()
+            physical_dpi = screen.physicalDotsPerInch()
+            device_pixel_ratio = screen.devicePixelRatio()
+            
+            # 计算系统缩放比例 - 更准确的方法
+            system_scale_factor = logical_dpi / 96.0  # Windows标准DPI
+            
             return {
                 'width': geometry.width(),
                 'height': geometry.height(),
-                'dpi_ratio': screen.devicePixelRatio()
+                'dpi_ratio': device_pixel_ratio,
+                'logical_dpi': logical_dpi,
+                'physical_dpi': physical_dpi,
+                'scale_factor': system_scale_factor
             }
     
     def safe_show_status_message(self, message: str):
@@ -1335,9 +1369,379 @@ class MainWindow(QMainWindow):
         if status_bar is not None:
             status_bar.showMessage(message)
     
+    def get_dpi_scaled_size(self, base_size: int) -> int:
+        """根据系统DPI设置计算适配后的尺寸"""
+        screen_info = self.get_safe_screen_info()
+        
+        # 使用系统缩放比例和用户自定义缩放的组合
+        system_scale = screen_info['scale_factor']
+        user_scale = self.display_scale / 100.0
+        
+        # 最终缩放比例 = 系统缩放 × 用户缩放
+        final_scale = system_scale * user_scale
+        
+        # 应用缩放并确保最小值
+        scaled_size = max(int(base_size * final_scale), base_size // 2)
+        
+        return scaled_size
+    
+    def get_dpi_scaled_font_size(self, base_font_size: int) -> int:
+        """根据系统DPI设置计算适配后的字体大小"""
+        return self.get_dpi_scaled_size(base_font_size)
+    
+    def detect_system_theme(self):
+        """检测系统主题（深色/浅色模式）"""
+        try:
+            import platform
+            system = platform.system()
+            
+            if system == "Darwin":  # macOS
+                import subprocess
+                result = subprocess.run(
+                    ["defaults", "read", "-g", "AppleInterfaceStyle"], 
+                    capture_output=True, text=True
+                )
+                return "dark" if result.stdout.strip() == "Dark" else "light"
+            elif system == "Windows":
+                try:
+                    import winreg
+                    registry = winreg.ConnectRegistry(None, winreg.HKEY_CURRENT_USER)
+                    key = winreg.OpenKey(registry, r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+                    value = winreg.QueryValueEx(key, "AppsUseLightTheme")[0]
+                    winreg.CloseKey(key)
+                    return "light" if value else "dark"
+                except:
+                    return "light"
+            else:  # Linux等
+                return "light"
+        except:
+            return "light"
+    
+    def get_system_theme_colors(self):
+        """根据系统主题获取适当的颜色"""
+        theme = self.detect_system_theme()
+        
+        if theme == "dark":
+            return {
+                'background': '#2b2b2b',
+                'surface': '#3c3c3c', 
+                'text': '#ffffff',
+                'text_secondary': '#b0b0b0',
+                'border': '#555555',
+                'accent': '#0084ff',
+                'card_bg': '#404040',
+                'input_bg': '#353535'
+            }
+        else:
+            return {
+                'background': '#f8f9fa',
+                'surface': '#ffffff',
+                'text': '#000000', 
+                'text_secondary': '#6c757d',
+                'border': '#dee2e6',
+                'accent': '#007bff',
+                'card_bg': '#ffffff',
+                'input_bg': '#ffffff'
+                         }
+    
+    def apply_consistent_styling(self):
+        """应用统一的字体大小和系统主题跟随样式"""
+        # 检测是否应该使用系统主题
+        use_system_theme = self.settings.value("use_system_theme", True, type=bool)
+        
+        if use_system_theme:
+            # 使用系统主题
+            theme_colors = self.get_system_theme_colors()
+            font_color = theme_colors['text']
+            background_color = theme_colors['input_bg']
+            card_bg = theme_colors['card_bg']
+            border_color = theme_colors['border']
+            accent_color = theme_colors['accent']
+        else:
+            # 使用用户自定义颜色
+            font_color = self.font_color
+            background_color = self.background_color
+            card_bg = "#ffffff"
+            border_color = "#dee2e6"
+            accent_color = "#007bff"
+        
+        # 统一的基础字体大小 - 所有控件使用相同大小
+        base_font_size = self.get_dpi_scaled_font_size(self.font_size)
+        
+        # 构建字体样式字符串
+        font_weight = "bold" if self.font_bold else "normal"
+        font_style = "italic" if self.font_italic else "normal"
+        text_decoration = "underline" if self.font_underline else "none"
+        
+        # 应用全局样式 - 确保所有控件字体大小完全统一
+        self.setStyleSheet(f"""
+            /* 全局字体设置 - 强制所有控件使用统一字体大小 */
+            * {{
+                font-family: '{self.font_family}', 'Microsoft YaHei', 'SimHei', sans-serif !important;
+                font-size: {base_font_size}px !important;
+                font-weight: {font_weight} !important;
+                font-style: {font_style} !important;
+            }}
+            
+            QMainWindow {{
+                background-color: {theme_colors.get('background', '#f8f9fa') if use_system_theme else '#f8f9fa'};
+                color: {font_color};
+            }}
+            
+            QWidget {{
+                color: {font_color};
+                background-color: transparent;
+            }}
+            
+            /* 输入控件 */
+            QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QDateEdit {{
+                color: {font_color};
+                background-color: {background_color};
+                border: 1px solid {border_color};
+                padding: 6px;
+                border-radius: 4px;
+            }}
+            
+            QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, 
+            QComboBox:focus, QDateEdit:focus {{
+                border: 2px solid {accent_color};
+            }}
+            
+            /* 文本显示控件 */
+            QLabel {{
+                color: {font_color};
+                background-color: transparent;
+                text-decoration: {text_decoration};
+            }}
+            
+            /* 按钮 */
+            QPushButton {{
+                color: {font_color};
+                background-color: #e9ecef;
+                border: 1px solid {border_color};
+                padding: 8px 16px;
+                border-radius: 4px;
+            }}
+            
+            QPushButton:hover {{
+                background-color: #dee2e6;
+            }}
+            
+            QPushButton:pressed {{
+                background-color: #d3d9df;
+            }}
+            
+            QPushButton:disabled {{
+                background-color: #f8f9fa;
+                color: #6c757d;
+            }}
+            
+            /* 复选框和单选按钮 */
+            QCheckBox, QRadioButton {{
+                color: {font_color};
+                background-color: transparent;
+                spacing: 6px;
+            }}
+            
+            QCheckBox::indicator, QRadioButton::indicator {{
+                width: {self.get_dpi_scaled_size(16)}px;
+                height: {self.get_dpi_scaled_size(16)}px;
+                background-color: {background_color};
+                border: 1px solid {border_color};
+            }}
+            
+            QCheckBox::indicator {{
+                border-radius: 3px;
+            }}
+            
+            QRadioButton::indicator {{
+                border-radius: {self.get_dpi_scaled_size(8)}px;
+            }}
+            
+            QCheckBox::indicator:checked, QRadioButton::indicator:checked {{
+                background-color: {accent_color};
+                border: 1px solid {accent_color};
+            }}
+            
+            /* 表格 */
+            QTableWidget {{
+                color: {font_color};
+                background-color: {background_color};
+                gridline-color: {border_color};
+                selection-background-color: {accent_color}40;
+            }}
+            
+            QTableWidget::item {{
+                color: {font_color};
+                padding: 4px;
+                border: none;
+            }}
+            
+            QHeaderView::section {{
+                color: {font_color};
+                background-color: {card_bg};
+                border: 1px solid {border_color};
+                padding: 6px;
+                font-weight: bold;
+            }}
+            
+            /* 文本编辑器 */
+            QTextEdit {{
+                color: {font_color};
+                background-color: {background_color};
+                border: 1px solid {border_color};
+                border-radius: 4px;
+                padding: 8px;
+            }}
+            
+            /* 分组框 */
+            QGroupBox {{
+                color: {font_color};
+                border: 1px solid {border_color};
+                border-radius: 6px;
+                margin-top: 10px;
+                background-color: transparent;
+            }}
+            
+            QGroupBox::title {{
+                color: {font_color};
+                subcontrol-origin: margin;
+                left: 12px;
+                padding: 0 8px 0 8px;
+                background-color: {theme_colors.get('background', '#f8f9fa') if use_system_theme else '#f8f9fa'};
+            }}
+            
+            /* 标签页 */
+            QTabWidget::pane {{
+                border: 1px solid {border_color};
+                border-radius: 4px;
+                background-color: {card_bg};
+            }}
+            
+            QTabBar::tab {{
+                color: {font_color};
+                background-color: {card_bg};
+                border: 1px solid {border_color};
+                padding: 8px 16px;
+                margin-right: 2px;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+            }}
+            
+            QTabBar::tab:selected {{
+                background-color: {card_bg};
+                border-bottom: 2px solid {accent_color};
+                color: {accent_color};
+                font-weight: bold;
+            }}
+            
+            QTabBar::tab:hover {{
+                background-color: {border_color};
+            }}
+            
+            /* 状态栏 */
+            QStatusBar {{
+                background-color: {theme_colors.get('background', '#f8f9fa') if use_system_theme else '#f8f9fa'};
+                color: {font_color};
+                border-top: 1px solid {border_color};
+                padding: 4px;
+            }}
+            
+            /* 菜单栏 */
+            QMenuBar {{
+                background-color: {theme_colors.get('background', '#f8f9fa') if use_system_theme else '#f8f9fa'};
+                color: {font_color};
+                border-bottom: 1px solid {border_color};
+            }}
+            
+            QMenuBar::item {{
+                background-color: transparent;
+                padding: 4px 8px;
+                border-radius: 4px;
+            }}
+            
+            QMenuBar::item:selected {{
+                background-color: {border_color};
+            }}
+            
+            QMenu {{
+                background-color: {card_bg};
+                border: 1px solid {border_color};
+                border-radius: 4px;
+            }}
+            
+            QMenu::item {{
+                padding: 6px 12px;
+            }}
+            
+            QMenu::item:selected {{
+                background-color: {border_color};
+            }}
+            
+            /* 进度条 */
+            QProgressBar {{
+                background-color: {background_color};
+                border: 1px solid {border_color};
+                border-radius: 4px;
+                color: {font_color};
+                text-align: center;
+            }}
+            
+            QProgressBar::chunk {{
+                background-color: {accent_color};
+                border-radius: 3px;
+            }}
+            
+            /* 工具提示 */
+            QToolTip {{
+                background-color: {card_bg};
+                color: {font_color};
+                border: 1px solid {border_color};
+                padding: 4px;
+                border-radius: 4px;
+            }}
+        """)
+    
+    def force_uniform_font_on_all_widgets(self):
+        """遍历所有控件，强制设置统一的字体大小（最终保险措施）"""
+        try:
+            base_font_size = self.get_dpi_scaled_font_size(self.font_size)
+            
+            # 创建统一的字体对象
+            uniform_font = QFont(self.font_family)
+            uniform_font.setPointSize(base_font_size)
+            uniform_font.setBold(self.font_bold)
+            uniform_font.setItalic(self.font_italic)
+            uniform_font.setUnderline(self.font_underline)
+            
+            def apply_font_to_widget(widget):
+                if widget is None:
+                    return
+                
+                try:
+                    # 设置字体
+                    widget.setFont(uniform_font)
+                    
+                    # 递归处理所有子控件
+                    for child in widget.findChildren(QWidget):
+                        child.setFont(uniform_font)
+                        
+                except Exception as e:
+                    # 忽略无法设置字体的控件
+                    pass
+            
+            # 从主窗口开始遍历
+            apply_font_to_widget(self)
+            
+            print(f"✅ 字体统一完成：所有控件已设置为 {self.font_family} {base_font_size}px")
+            
+        except Exception as e:
+            print(f"⚠️ 字体统一过程中出现错误: {e}")
+
+     
     def init_ui(self):
         """初始化界面"""
-        self.setWindowTitle("DHI智能筛选大师")
+        self.setWindowTitle("DHI数据分析与牛群健康监测系统")
         
         # 创建菜单栏
         self.create_menu_bar()
@@ -1366,348 +1770,10 @@ class MainWindow(QMainWindow):
         except:
             pass
         
-        # 设置全局样式 - 支持DPI缩放和用户设置的字体样式
-        dpi_ratio = screen_info['dpi_ratio']
-        # 应用用户设置的缩放比例和字体大小
-        scale_factor = self.display_scale / 100.0
-        user_font_size = self.font_size * scale_factor
-        base_font_size = max(int(user_font_size * dpi_ratio * 0.6), 8)
+        # 应用系统主题跟随和统一字体大小
+        self.apply_consistent_styling()
         
-        # 构建字体样式字符串
-        font_weight = "bold" if self.font_bold else "normal"
-        font_style = "italic" if self.font_italic else "normal"
-        text_decoration = "underline" if self.font_underline else "none"
-        
-        # 应用用户设置的颜色和字体样式
-        self.setStyleSheet(f"""
-            QMainWindow {{
-                background-color: #f8f9fa;
-                color: {self.font_color};
-                font-family: '{self.font_family}', 'Microsoft YaHei', 'SimHei', sans-serif;
-                font-size: {base_font_size}px;
-                font-weight: {font_weight};
-                font-style: {font_style};
-            }}
-            QWidget {{
-                font-family: '{self.font_family}', 'Microsoft YaHei', 'SimHei', sans-serif;
-                font-size: {base_font_size}px;
-                color: {self.font_color};
-                font-weight: {font_weight};
-                font-style: {font_style};
-            }}
-            
-            /* 主要工作面板的框架保持透明或灰色 */
-            QScrollArea {{
-                background-color: #f8f9fa;
-                border: 1px solid #ddd;
-            }}
-            QScrollArea > QWidget {{
-                background-color: #f8f9fa;
-            }}
-            
-            /* 右侧结果面板框架 */
-            QTabWidget {{
-                background-color: #f8f9fa;
-                color: {self.font_color};
-            }}
-            QTabWidget::pane {{
-                background-color: #f8f9fa;
-                border: 1px solid #ddd;
-            }}
-            QTabBar::tab {{
-                color: {self.font_color};
-                background-color: #f8f9fa;
-                border: 1px solid #ccc;
-                padding: 8px 16px;
-                margin-right: 2px;
-            }}
-            QTabBar::tab:selected {{
-                background-color: #ffffff;
-                border-bottom: 2px solid #007bff;
-            }}
-            
-            /* 重点：强制应用输入控件背景色和字体样式，移除系统默认样式 */
-            QLineEdit {{
-                color: {self.font_color} !important;
-                background-color: {self.background_color} !important;
-                border: 1px solid #ccc !important;
-                padding: 6px !important;
-                border-radius: 4px !important;
-                selection-background-color: #007bff !important;
-                selection-color: white !important;
-                outline: none !important;
-                font-family: '{self.font_family}', 'Microsoft YaHei', 'SimHei', sans-serif !important;
-                font-weight: {font_weight} !important;
-                font-style: {font_style} !important;
-            }}
-            QLineEdit:focus {{
-                border: 2px solid #007bff !important;
-                background-color: {self.background_color} !important;
-                outline: none !important;
-            }}
-            QLineEdit:hover {{
-                background-color: {self.background_color} !important;
-            }}
-            
-            QSpinBox, QDoubleSpinBox {{
-                color: {self.font_color} !important;
-                background-color: {self.background_color} !important;
-                border: 1px solid #ccc !important;
-                padding: 6px !important;
-                border-radius: 4px !important;
-                selection-background-color: #007bff !important;
-                selection-color: white !important;
-                outline: none !important;
-                font-family: '{self.font_family}', 'Microsoft YaHei', 'SimHei', sans-serif !important;
-                font-weight: {font_weight} !important;
-                font-style: {font_style} !important;
-            }}
-            QSpinBox:focus, QDoubleSpinBox:focus {{
-                border: 2px solid #007bff !important;
-                background-color: {self.background_color} !important;
-                outline: none !important;
-            }}
-            QSpinBox:hover, QDoubleSpinBox:hover {{
-                background-color: {self.background_color} !important;
-            }}
-            QSpinBox::up-button, QSpinBox::down-button,
-            QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
-                background-color: {self.background_color} !important;
-                border: 1px solid #ccc !important;
-            }}
-            
-            QComboBox {{
-                color: {self.font_color} !important;
-                background-color: {self.background_color} !important;
-                border: 1px solid #ccc !important;
-                padding: 6px !important;
-                border-radius: 4px !important;
-                min-width: 6em !important;
-                outline: none !important;
-                font-family: '{self.font_family}', 'Microsoft YaHei', 'SimHei', sans-serif !important;
-                font-weight: {font_weight} !important;
-                font-style: {font_style} !important;
-            }}
-            QComboBox:focus {{
-                border: 2px solid #007bff !important;
-                background-color: {self.background_color} !important;
-                outline: none !important;
-            }}
-            QComboBox:hover {{
-                background-color: {self.background_color} !important;
-            }}
-            QComboBox::drop-down {{
-                background-color: {self.background_color} !important;
-                border: none !important;
-                width: 20px !important;
-            }}
-            QComboBox::down-arrow {{
-                border: none !important;
-                width: 12px !important;
-                height: 12px !important;
-            }}
-            QComboBox QAbstractItemView {{
-                color: {self.font_color} !important;
-                background-color: {self.background_color} !important;
-                selection-background-color: #e9ecef !important;
-                border: 1px solid #ccc !important;
-            }}
-            
-            QDateEdit {{
-                color: {self.font_color} !important;
-                background-color: {self.background_color} !important;
-                border: 1px solid #ccc !important;
-                padding: 6px !important;
-                border-radius: 4px !important;
-                outline: none !important;
-                font-family: '{self.font_family}', 'Microsoft YaHei', 'SimHei', sans-serif !important;
-                font-weight: {font_weight} !important;
-                font-style: {font_style} !important;
-            }}
-            QDateEdit:focus {{
-                border: 2px solid #007bff !important;
-                background-color: {self.background_color} !important;
-                outline: none !important;
-            }}
-            QDateEdit:hover {{
-                background-color: {self.background_color} !important;
-            }}
-            QDateEdit::drop-down {{
-                background-color: {self.background_color} !important;
-                border: none !important;
-                width: 20px !important;
-            }}
-            QDateEdit::up-button, QDateEdit::down-button {{
-                background-color: {self.background_color} !important;
-                border: 1px solid #ccc !important;
-            }}
-            
-            /* 表格显示区域 */
-            QTableWidget {{
-                color: {self.font_color} !important;
-                background-color: {self.background_color} !important;
-                gridline-color: #ddd !important;
-                alternate-background-color: {self.background_color} !important;
-                selection-background-color: #e3f2fd !important;
-                selection-color: {self.font_color} !important;
-                font-family: '{self.font_family}', 'Microsoft YaHei', 'SimHei', sans-serif !important;
-                font-weight: {font_weight} !important;
-                font-style: {font_style} !important;
-            }}
-            QTableWidget::item {{
-                color: {self.font_color} !important;
-                background-color: {self.background_color} !important;
-                border: none !important;
-                padding: 4px !important;
-            }}
-            QTableWidget::item:selected {{
-                background-color: #e3f2fd !important;
-                color: {self.font_color} !important;
-            }}
-            QHeaderView::section {{
-                color: {self.font_color} !important;
-                background-color: #f0f0f0 !important;
-                border: 1px solid #ccc !important;
-                padding: 6px !important;
-                font-weight: bold !important;
-            }}
-            
-            /* 文本显示区域 */
-            QTextEdit {{
-                color: {self.font_color} !important;
-                background-color: {self.background_color} !important;
-                border: 1px solid #ccc !important;
-                border-radius: 4px !important;
-                padding: 8px !important;
-                font-family: '{self.font_family}', 'Microsoft YaHei', 'SimHei', sans-serif !important;
-                font-weight: {font_weight} !important;
-                font-style: {font_style} !important;
-            }}
-            QTextEdit:focus {{
-                border: 2px solid #007bff !important;
-                background-color: {self.background_color} !important;
-            }}
-            
-            /* 其他控件保持透明背景 */
-            QLabel {{
-                color: {self.font_color} !important;
-                background-color: transparent !important;
-                font-family: '{self.font_family}', 'Microsoft YaHei', 'SimHei', sans-serif !important;
-                font-weight: {font_weight} !important;
-                font-style: {font_style} !important;
-                text-decoration: {text_decoration} !important;
-            }}
-            QPushButton {{
-                color: {self.font_color} !important;
-                background-color: #e9ecef !important;
-                border: 1px solid #ccc !important;
-                padding: 8px 16px !important;
-                border-radius: 4px !important;
-                font-family: '{self.font_family}', 'Microsoft YaHei', 'SimHei', sans-serif !important;
-                font-weight: {font_weight} !important;
-                font-style: {font_style} !important;
-            }}
-            QPushButton:hover {{
-                background-color: #dee2e6 !important;
-            }}
-            QPushButton:pressed {{
-                background-color: #d3d9df !important;
-            }}
-            QPushButton:disabled {{
-                background-color: #f8f9fa !important;
-                color: #6c757d !important;
-            }}
-            
-            QCheckBox {{
-                color: {self.font_color} !important;
-                background-color: transparent !important;
-                spacing: 6px !important;
-                font-family: '{self.font_family}', 'Microsoft YaHei', 'SimHei', sans-serif !important;
-                font-weight: {font_weight} !important;
-                font-style: {font_style} !important;
-            }}
-            QCheckBox::indicator {{
-                width: 16px !important;
-                height: 16px !important;
-                background-color: {self.background_color} !important;
-                border: 1px solid #ccc !important;
-                border-radius: 3px !important;
-            }}
-            QCheckBox::indicator:checked {{
-                background-color: #007bff !important;
-                border: 1px solid #007bff !important;
-            }}
-            QCheckBox::indicator:hover {{
-                border: 1px solid #007bff !important;
-                background-color: {self.background_color} !important;
-            }}
-            
-            QRadioButton {{
-                color: {self.font_color} !important;
-                background-color: transparent !important;
-                spacing: 6px !important;
-                font-family: '{self.font_family}', 'Microsoft YaHei', 'SimHei', sans-serif !important;
-                font-weight: {font_weight} !important;
-                font-style: {font_style} !important;
-            }}
-            QRadioButton::indicator {{
-                width: 16px !important;
-                height: 16px !important;
-                background-color: {self.background_color} !important;
-                border: 1px solid #ccc !important;
-                border-radius: 8px !important;
-            }}
-            QRadioButton::indicator:checked {{
-                background-color: #007bff !important;
-                border: 1px solid #007bff !important;
-            }}
-            QRadioButton::indicator:hover {{
-                border: 1px solid #007bff !important;
-                background-color: {self.background_color} !important;
-            }}
-            
-            QGroupBox {{
-                color: {self.font_color} !important;
-                border: 1px solid #ccc !important;
-                border-radius: 6px !important;
-                margin-top: 10px !important;
-                background-color: transparent !important;
-                font-family: '{self.font_family}', 'Microsoft YaHei', 'SimHei', sans-serif !important;
-                font-weight: {font_weight} !important;
-                font-style: {font_style} !important;
-            }}
-            QGroupBox::title {{
-                color: {self.font_color} !important;
-                subcontrol-origin: margin !important;
-                left: 12px !important;
-                padding: 0 8px 0 8px !important;
-                background-color: #f8f9fa !important;
-                font-family: '{self.font_family}', 'Microsoft YaHei', 'SimHei', sans-serif !important;
-                font-weight: {font_weight} !important;
-                font-style: {font_style} !important;
-            }}
-            
-            /* 进度条样式 */
-            QProgressBar {{
-                background-color: {self.background_color} !important;
-                border: 1px solid #ccc !important;
-                border-radius: 4px !important;
-                color: {self.font_color} !important;
-                text-align: center !important;
-                font-family: '{self.font_family}', 'Microsoft YaHei', 'SimHei', sans-serif !important;
-                font-weight: {font_weight} !important;
-                font-style: {font_style} !important;
-            }}
-            QProgressBar::chunk {{
-                background-color: #007bff !important;
-                border-radius: 3px !important;
-            }}
-            
-            /* 移除任何可能导致意外颜色的默认样式 */
-            * {{
-                outline: none !important;
-            }}
-        """)
+
         
         # 创建中央部件
         central_widget = QWidget()
@@ -1736,8 +1802,8 @@ class MainWindow(QMainWindow):
         left_scroll.setWidgetResizable(True)
         left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         left_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        left_scroll.setMinimumWidth(420)
-        left_scroll.setMaximumWidth(600)
+        left_scroll.setMinimumWidth(580)  # 增加最小宽度以确保内容显示完整
+        left_scroll.setMaximumWidth(800)  # 增加最大宽度允许更多调整空间
         
         left_panel = self.create_control_panel()
         left_scroll.setWidget(left_panel)
@@ -1745,23 +1811,30 @@ class MainWindow(QMainWindow):
         
         # 右侧结果显示
         right_panel = self.create_result_panel()
-        right_panel.setMinimumWidth(500)
+        right_panel.setMinimumWidth(200)  # 减少右侧最小宽度限制，允许拖拽条更灵活
         content_splitter.addWidget(right_panel)
         
-        # 设置分割器比例和约束
-        content_splitter.setSizes([int(window_width * 0.4), int(window_width * 0.6)])
+        # 设置分割器比例和约束 - 调整为5:5比例，给左侧更多空间
+        left_width = max(580, int(window_width * 0.5))  # 确保左侧至少580px
+        right_width = window_width - left_width
+        content_splitter.setSizes([left_width, right_width])
         content_splitter.setCollapsible(0, False)
         content_splitter.setCollapsible(1, False)
         
-        # 设置分割器样式
+        # 设置分割器样式 - 更明显的拖拽手柄
         content_splitter.setStyleSheet("""
             QSplitter::handle {
-                background-color: #dee2e6;
-                width: 3px;
-                margin: 2px;
+                background-color: #ced4da;
+                width: 5px;
+                margin: 1px;
+                border-radius: 2px;
             }
             QSplitter::handle:hover {
                 background-color: #007bff;
+                width: 7px;
+            }
+            QSplitter::handle:pressed {
+                background-color: #0056b3;
             }
         """)
         
@@ -1769,6 +1842,9 @@ class MainWindow(QMainWindow):
         
         # 状态栏
         self.setup_status_bar()
+        
+        # 强制统一所有控件的字体大小（最终保险措施）
+        QTimer.singleShot(500, self.force_uniform_font_on_all_widgets)
     
     def create_menu_bar(self):
         """创建菜单栏"""
@@ -1776,14 +1852,11 @@ class MainWindow(QMainWindow):
         if menubar is None:
             return
         
-        # 设置菜单栏样式
-        scale_factor = self.display_scale / 100.0
-        menu_font_size = max(int(12 * scale_factor), 10)
+        # 设置菜单栏样式 - 使用统一字体大小
         menubar.setStyleSheet(f"""
             QMenuBar {{
                 background-color: #f8f9fa;
                 border-bottom: 1px solid #dee2e6;
-                font-size: {menu_font_size}px;
                 padding: 4px;
             }}
             QMenuBar::item {{
@@ -1798,7 +1871,6 @@ class MainWindow(QMainWindow):
                 background-color: white;
                 border: 1px solid #dee2e6;
                 border-radius: 4px;
-                font-size: {menu_font_size}px;
             }}
             QMenu::item {{
                 padding: 6px 12px;
@@ -1845,6 +1917,23 @@ class MainWindow(QMainWindow):
             
             if msg.clickedButton() == restart_btn:
                 self.restart_application()
+            else:
+                # 即时应用样式更新，无需重启
+                # 重新加载设置
+                self.display_scale = self.settings.value("display_scale", 100, type=int)
+                self.font_color = self.settings.value("font_color", "#000000", type=str)
+                self.background_color = self.settings.value("background_color", "#ffffff", type=str)
+                self.font_family = self.settings.value("font_family", "Microsoft YaHei", type=str)
+                self.font_size = self.settings.value("font_size", 12, type=int)
+                self.font_bold = self.settings.value("font_bold", False, type=bool)
+                self.font_italic = self.settings.value("font_italic", False, type=bool)
+                self.font_underline = self.settings.value("font_underline", False, type=bool)
+                
+                # 应用新的样式
+                self.apply_consistent_styling()
+                
+                # 强制统一所有控件的字体大小
+                QTimer.singleShot(100, self.force_uniform_font_on_all_widgets)
     
     def show_about(self):
         """显示关于对话框"""
@@ -1867,15 +1956,11 @@ class MainWindow(QMainWindow):
         status_bar = self.statusBar()
         if status_bar is not None:
             status_bar.showMessage("准备就绪")
-            screen_info = self.get_safe_screen_info()
-            dpi_ratio = screen_info['dpi_ratio']
-            status_font_size = max(int(14 * dpi_ratio * 0.8), 12)
             status_bar.setStyleSheet(f"""
                 QStatusBar {{
                     background-color: #e9ecef;
                     border-top: 1px solid #dee2e6;
                     padding: 8px 15px;
-                    font-size: {status_font_size}px;
                 }}
             """)
     
@@ -1906,15 +1991,12 @@ class MainWindow(QMainWindow):
         
         # 图标
         icon_label = QLabel("🥛")
-        icon_size = max(int(header_height * 0.15), 12)
-        icon_label.setStyleSheet(f"font-size: {icon_size}px; background: transparent;")
+        icon_label.setStyleSheet(f"background: transparent;")
         title_layout.addWidget(icon_label)
         
         # 标题文字
         title_label = QLabel("奶牛蛋白筛查系统")
-        title_font_size = max(int(header_height * 0.12), 12)
         title_label.setStyleSheet(f"""
-            font-size: {title_font_size}px;
             font-weight: bold;
             color: white;
             background: transparent;
@@ -1937,7 +2019,6 @@ class MainWindow(QMainWindow):
                 border: 1px solid rgba(255, 255, 255, 0.3);
                 border-radius: {btn_size // 2}px;
                 color: white;
-                font-size: {max(int(header_height * 0.08), 10)}px;
             }}
             QPushButton:hover {{
                 background-color: rgba(255, 255, 255, 0.3);
@@ -1950,9 +2031,7 @@ class MainWindow(QMainWindow):
         
         # 右侧副标题
         subtitle_label = QLabel("DHI报告 04-2综合测定结果表筛查工具")
-        subtitle_font_size = max(int(header_height * 0.07), 9)
         subtitle_label.setStyleSheet(f"""
-            font-size: {subtitle_font_size}px;
             color: rgba(255, 255, 255, 0.8);
             background: transparent;
             margin-left: 10px;
@@ -2107,16 +2186,11 @@ class MainWindow(QMainWindow):
         return card
     
     def get_responsive_button_styles(self):
-        """获取自适应按钮样式"""
-        screen = QApplication.primaryScreen()
-        dpi_ratio = screen.devicePixelRatio()
-        scale_factor = self.display_scale / 100.0
-        
-        # 基础尺寸
-        font_size = max(int(13 * dpi_ratio * 0.7 * scale_factor), 10)
-        padding_v = max(int(6 * dpi_ratio * 0.6 * scale_factor), 4)
-        padding_h = max(int(12 * dpi_ratio * 0.6 * scale_factor), 6)
-        border_radius = max(int(5 * dpi_ratio * 0.6 * scale_factor), 3)
+        """获取自适应按钮样式 - 使用统一字体大小"""
+        # 使用统一的DPI缩放方法
+        padding_v = self.get_dpi_scaled_size(8)
+        padding_h = self.get_dpi_scaled_size(16)
+        border_radius = self.get_dpi_scaled_size(5)
         
         return {
             'primary': f"""
@@ -2126,9 +2200,7 @@ class MainWindow(QMainWindow):
                     border: none;
                     border-radius: {border_radius}px;
                     padding: {padding_v}px {padding_h}px;
-                    font-size: {font_size}px;
                     font-weight: bold;
-                    min-height: {padding_v * 2 + font_size}px;
                 }}
                 QPushButton:hover {{
                     background-color: #0056b3;
@@ -2148,9 +2220,7 @@ class MainWindow(QMainWindow):
                     border: none;
                     border-radius: {border_radius}px;
                     padding: {padding_v}px {padding_h}px;
-                    font-size: {font_size}px;
                     font-weight: bold;
-                    min-height: {padding_v * 2 + font_size}px;
                 }}
                 QPushButton:hover {{
                     background-color: #218838;
@@ -2170,9 +2240,7 @@ class MainWindow(QMainWindow):
                     border: none;
                     border-radius: {border_radius}px;
                     padding: {padding_v}px {padding_h}px;
-                    font-size: {font_size}px;
                     font-weight: bold;
-                    min-height: {padding_v * 2 + font_size}px;
                 }}
                 QPushButton:hover {{
                     background-color: #e0a800;
@@ -2192,9 +2260,7 @@ class MainWindow(QMainWindow):
                     border: none;
                     border-radius: {border_radius}px;
                     padding: {padding_v}px {padding_h}px;
-                    font-size: {font_size}px;
                     font-weight: bold;
-                    min-height: {padding_v * 2 + font_size}px;
                 }}
                 QPushButton:hover {{
                     background-color: #138496;
@@ -2206,77 +2272,15 @@ class MainWindow(QMainWindow):
                     background-color: #6c757d;
                     color: #adb5bd;
                 }}
-            """
-        }
-    
-    def get_responsive_form_styles(self):
-        """获取自适应表单样式"""
-        screen = QApplication.primaryScreen()
-        dpi_ratio = screen.devicePixelRatio()
-        scale_factor = self.display_scale / 100.0
-        
-        font_size = max(int(13 * dpi_ratio * 0.7 * scale_factor), 10)
-        padding_v = max(int(4 * dpi_ratio * 0.6 * scale_factor), 2)
-        padding_h = max(int(8 * dpi_ratio * 0.6 * scale_factor), 4)
-        border_radius = max(int(4 * dpi_ratio * 0.6 * scale_factor), 2)
-        min_height = max(int(20 * dpi_ratio * 0.6 * scale_factor), 16)
-        
-        return f"""
-            QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit {{
-                border: 1px solid #ced4da;
-                border-radius: {border_radius}px;
-                padding: {padding_v}px {padding_h}px;
-                font-size: {font_size}px;
-                background-color: white;
-                min-height: {min_height}px;
-            }}
-            QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QDateEdit:focus {{
-                border-color: #007bff;
-                outline: none;
-            }}
-            QLabel {{
-                font-weight: 500;
-                color: #495057;
-                font-size: {font_size}px;
-            }}
-        """
-    
-    def create_control_panel(self):
-        """创建左侧控制面板"""
-        panel = QWidget()
-        panel.setStyleSheet("""
-            QWidget {
-                background-color: white;
-                border-radius: 8px;
-            }
-        """)
-        layout = QVBoxLayout(panel)
-        
-        # 自适应边距和间距
-        screen = QApplication.primaryScreen()
-        dpi_ratio = screen.devicePixelRatio()
-        scale_factor = self.display_scale / 100.0
-        margin = max(int(15 * dpi_ratio * scale_factor), 8)
-        spacing = max(int(15 * dpi_ratio * scale_factor), 8)
-        
-        layout.setContentsMargins(margin, margin, margin, margin)
-        layout.setSpacing(spacing)
-        
-        # 获取自适应样式
-        button_styles = self.get_responsive_button_styles()
-        form_styles = self.get_responsive_form_styles()
-        
-        # 获取扩展按钮样式
-        button_styles.update({
+            """,
             'secondary': f"""
                 QPushButton {{
                     background-color: #6c757d;
                     color: white;
                     border: none;
-                    padding: {max(int(8 * dpi_ratio), 6)}px {max(int(16 * dpi_ratio), 12)}px;
-                    border-radius: {max(int(4 * dpi_ratio), 3)}px;
+                    border-radius: {border_radius}px;
+                    padding: {padding_v}px {padding_h}px;
                     font-weight: bold;
-                    font-size: {max(int(12 * dpi_ratio), 10)}px;
                 }}
                 QPushButton:hover {{
                     background-color: #5a6268;
@@ -2294,10 +2298,9 @@ class MainWindow(QMainWindow):
                     background-color: #dc3545;
                     color: white;
                     border: none;
-                    padding: {max(int(8 * dpi_ratio), 6)}px {max(int(16 * dpi_ratio), 12)}px;
-                    border-radius: {max(int(4 * dpi_ratio), 3)}px;
+                    border-radius: {border_radius}px;
+                    padding: {padding_v}px {padding_h}px;
                     font-weight: bold;
-                    font-size: {max(int(12 * dpi_ratio), 10)}px;
                 }}
                 QPushButton:hover {{
                     background-color: #c82333;
@@ -2310,12 +2313,166 @@ class MainWindow(QMainWindow):
                     color: #6c757d;
                 }}
             """
-        })
+        }
+    
+    def get_responsive_form_styles(self):
+        """获取自适应表单样式 - 使用统一字体大小"""
+        # 使用统一的DPI缩放方法
+        padding_v = self.get_dpi_scaled_size(8)  # 增加垂直内边距
+        padding_h = self.get_dpi_scaled_size(12)  # 增加水平内边距
+        border_radius = self.get_dpi_scaled_size(4)
+        min_height = self.get_dpi_scaled_size(32)  # 确保足够的最小高度
+        
+        return f"""
+            QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit {{
+                border: 2px solid #ced4da;
+                border-radius: {border_radius}px;
+                padding: {padding_v}px {padding_h}px;
+                background-color: white;
+                min-height: {min_height}px;
+                color: #495057;
+                selection-background-color: #007bff;
+                selection-color: white;
+            }}
+            QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QDateEdit:focus {{
+                border-color: #007bff;
+                outline: none;
+                border-width: 2px;
+            }}
+            QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover, QDateEdit:hover {{
+                border-color: #adb5bd;
+            }}
+            QLabel {{
+                font-weight: 500;
+                color: #495057;
+                padding: 2px 0px;
+            }}
+            
+            /* 确保下拉框和数字输入框的按钮显示正常 */
+            QComboBox::drop-down {{
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: {self.get_dpi_scaled_size(20)}px;
+                border-left: 1px solid #ced4da;
+                background-color: #f8f9fa;
+                border-top-right-radius: {border_radius}px;
+                border-bottom-right-radius: {border_radius}px;
+            }}
+            QComboBox::drop-down:hover {{
+                background-color: #e9ecef;
+            }}
+            
+            QSpinBox::up-button, QSpinBox::down-button,
+            QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
+                background-color: #f8f9fa;
+                border: 1px solid #ced4da;
+                width: {self.get_dpi_scaled_size(16)}px;
+                min-height: {self.get_dpi_scaled_size(14)}px;
+            }}
+            QSpinBox::up-button:hover, QSpinBox::down-button:hover,
+            QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover {{
+                background-color: #e9ecef;
+            }}
+            
+            QDateEdit::up-button, QDateEdit::down-button {{
+                background-color: #f8f9fa;
+                border: 1px solid #ced4da;
+                width: {self.get_dpi_scaled_size(16)}px;
+                min-height: {self.get_dpi_scaled_size(14)}px;
+            }}
+            QDateEdit::drop-down {{
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: {self.get_dpi_scaled_size(20)}px;
+                border-left: 1px solid #ced4da;
+                background-color: #f8f9fa;
+                border-top-right-radius: {border_radius}px;
+                border-bottom-right-radius: {border_radius}px;
+            }}
+        """
+    
+    def create_control_panel(self):
+        """创建左侧控制面板 - 重构为4个功能标签页"""
+        panel = QWidget()
+        panel.setStyleSheet("""
+            QWidget {
+                background-color: white;
+                border-radius: 8px;
+            }
+        """)
+        layout = QVBoxLayout(panel)
+        
+        # 自适应边距和间距 - 使用优化的DPI适配
+        margin = self.get_dpi_scaled_size(15)
+        spacing = self.get_dpi_scaled_size(15)
+        
+        layout.setContentsMargins(margin, margin, margin, margin)
+        layout.setSpacing(spacing)
+
+        # 创建功能标签页
+        self.function_tabs = QTabWidget()
+        
+        # 自适应标签页样式 - 使用优化的DPI适配
+        tab_font_size = self.get_dpi_scaled_font_size(13)
+        tab_padding_v = self.get_dpi_scaled_size(10)
+        tab_padding_h = self.get_dpi_scaled_size(14)
+        tab_border_radius = self.get_dpi_scaled_size(5)
+        
+        self.function_tabs.setStyleSheet(f"""
+            QTabWidget::pane {{
+                border: 1px solid #e0e0e0;
+                border-radius: {tab_border_radius}px;
+                background-color: white;
+                margin-top: -1px;
+            }}
+            QTabBar::tab {{
+                background-color: #f8f9fa;
+                border: 1px solid #e0e0e0;
+                padding: {tab_padding_v}px {tab_padding_h}px;
+                margin-right: 2px;
+                border-top-left-radius: {tab_border_radius}px;
+                border-top-right-radius: {tab_border_radius}px;
+                font-size: {tab_font_size}px;
+                font-weight: 500;
+                color: #495057;
+                min-width: 80px;
+            }}
+            QTabBar::tab:selected {{
+                background-color: white;
+                border-bottom: 1px solid white;
+                color: #007bff;
+                font-weight: bold;
+            }}
+            QTabBar::tab:hover {{
+                background-color: #e9ecef;
+            }}
+        """)
+        
+        # 创建4个功能标签页
+        self.create_basic_data_tab()
+        self.create_dhi_filter_tab()
+        self.create_mastitis_screening_tab()
+        self.create_mastitis_monitoring_tab()
+        
+        layout.addWidget(self.function_tabs)
+        
+        return panel
+
+    def create_basic_data_tab(self):
+        """创建基础数据标签页：文件上传 + 在群牛文件 + 基础筛选条件"""
+        tab_widget = QWidget()
+        tab_layout = QVBoxLayout(tab_widget)
+        
+        # 获取自适应样式
+        button_styles = self.get_responsive_button_styles()
+        form_styles = self.get_responsive_form_styles()
+        
+        # 使用统一的边距
+        card_margin = self.get_dpi_scaled_size(12)
         
         # 1. 文件上传区域
         upload_group = self.create_card_widget("📁 文件上传")
         upload_layout = QVBoxLayout(getattr(upload_group, 'content_widget'))
-        card_margin = max(int(12 * dpi_ratio * scale_factor), 6)
         upload_layout.setContentsMargins(card_margin, card_margin, card_margin, card_margin)
         
         # 文件选择按钮
@@ -2326,13 +2483,12 @@ class MainWindow(QMainWindow):
         
         # 文件列表
         self.file_list = QListWidget()
-        # 自适应文件列表高度
-        list_height = max(int(100 * dpi_ratio), 80)
+        list_height = self.get_dpi_scaled_size(100)
         self.file_list.setMaximumHeight(list_height)
         
-        list_border_radius = max(int(4 * dpi_ratio), 3)
-        list_padding = max(int(5 * dpi_ratio), 3)
-        item_padding = max(int(5 * dpi_ratio), 3)
+        list_border_radius = self.get_dpi_scaled_size(4)
+        list_padding = self.get_dpi_scaled_size(5)
+        item_padding = self.get_dpi_scaled_size(5)
         
         self.file_list.setStyleSheet(f"""
             QListWidget {{
@@ -2363,9 +2519,10 @@ class MainWindow(QMainWindow):
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
         
-        progress_border_radius = max(int(4 * dpi_ratio), 3)
-        progress_padding = max(int(2 * dpi_ratio), 1)
-        progress_chunk_radius = max(int(3 * dpi_ratio), 2)
+        progress_border_radius = self.get_dpi_scaled_size(4)
+        progress_padding = self.get_dpi_scaled_size(2)
+        progress_chunk_radius = self.get_dpi_scaled_size(3)
+        min_height = self.get_dpi_scaled_size(20)
         
         self.progress_bar.setStyleSheet(f"""
             QProgressBar {{
@@ -2374,7 +2531,7 @@ class MainWindow(QMainWindow):
                 text-align: center;
                 padding: {progress_padding}px;
                 background-color: #f8f9fa;
-                min-height: {max(int(20 * dpi_ratio), 16)}px;
+                min-height: {min_height}px;
             }}
             QProgressBar::chunk {{
                 background-color: #007bff;
@@ -2384,11 +2541,10 @@ class MainWindow(QMainWindow):
         upload_layout.addWidget(self.progress_bar)
         
         self.progress_label = QLabel("")
-        label_font_size = max(int(8 * dpi_ratio * 0.5), 8)
-        self.progress_label.setStyleSheet(f"color: #6c757d; font-size: {label_font_size}px;")
+        self.progress_label.setStyleSheet(f"color: #6c757d;")
         upload_layout.addWidget(self.progress_label)
         
-        layout.addWidget(upload_group)
+        tab_layout.addWidget(upload_group)
         
         # 2. 在群牛文件上传区域
         active_cattle_group = self.create_card_widget("🐄 在群牛文件")
@@ -2413,14 +2569,22 @@ class MainWindow(QMainWindow):
         self.clear_active_cattle_btn.setVisible(False)
         active_cattle_layout.addWidget(self.clear_active_cattle_btn)
         
-        layout.addWidget(active_cattle_group)
+        tab_layout.addWidget(active_cattle_group)
         
         # 3. 基础筛选条件区域
         basic_filter_group = self.create_card_widget("🔍 基础筛选条件")
         basic_filter_layout = QFormLayout(getattr(basic_filter_group, 'content_widget'))
         basic_filter_layout.setContentsMargins(card_margin, card_margin, card_margin, card_margin)
-        form_spacing = max(int(12 * dpi_ratio), 8)
-        basic_filter_layout.setSpacing(form_spacing)
+        
+        # 确保表单有足够的行间距和字段间距
+        form_spacing = self.get_dpi_scaled_size(15)  # 增加行间距
+        basic_filter_layout.setVerticalSpacing(form_spacing)
+        basic_filter_layout.setHorizontalSpacing(self.get_dpi_scaled_size(10))
+        
+        # 设置表单字段的增长策略，确保标签和控件都有足够空间
+        basic_filter_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        basic_filter_layout.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        basic_filter_layout.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
         
         # 牛场编号选择
         self.farm_combo = QComboBox()
@@ -2441,9 +2605,8 @@ class MainWindow(QMainWindow):
         parity_layout.addWidget(self.parity_min)
         dash_label = QLabel("—")
         dash_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        dash_font_size = max(int(14 * dpi_ratio), 12)
-        dash_margin = max(int(8 * dpi_ratio), 6)
-        dash_label.setStyleSheet(f"color: #6c757d; margin: 0 {dash_margin}px; font-size: {dash_font_size}px;")
+        dash_margin = self.get_dpi_scaled_size(8)
+        dash_label.setStyleSheet(f"color: #6c757d; margin: 0 {dash_margin}px;")
         parity_layout.addWidget(dash_label)
         parity_layout.addWidget(self.parity_max)
         basic_filter_layout.addRow("🐄 胎次范围:", parity_layout)
@@ -2454,17 +2617,15 @@ class MainWindow(QMainWindow):
         self.date_start.setDate(QDate(2024, 1, 1))
         self.date_start.setCalendarPopup(True)
         
-        # 专门为日期控件设计的样式，避免全黑问题
-        date_input_font_size = max(int(14 * dpi_ratio * 0.8), 12)
-        date_input_padding = max(int(8 * dpi_ratio * 0.6), 6)
-        date_border_radius = max(int(4 * dpi_ratio * 0.6), 3)
+        # 日期控件样式
+        date_input_padding = self.get_dpi_scaled_size(8)
+        date_border_radius = self.get_dpi_scaled_size(4)
         date_styles = f"""
             QDateEdit {{
                 border: 2px solid #ced4da;
                 border-radius: {date_border_radius}px;
                 padding: {date_input_padding}px;
                 background-color: white;
-                font-size: {date_input_font_size}px;
                 color: #495057;
                 selection-background-color: #007bff;
                 selection-color: white;
@@ -2488,11 +2649,6 @@ class MainWindow(QMainWindow):
             QDateEdit::drop-down:hover {{
                 background-color: #e9ecef;
             }}
-            QDateEdit::down-arrow {{
-                image: url(data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIiIGhlaWdodD0iOCIgdmlld0JveD0iMCAwIDEyIDgiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxwYXRoIGQ9Ik0xIDFMNiA2TDExIDEiIHN0cm9rZT0iIzZjNzU3ZCIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KPC9zdmc+);
-                width: 12px;
-                height: 8px;
-            }}
         """
         self.date_start.setStyleSheet(date_styles)
         
@@ -2503,7 +2659,7 @@ class MainWindow(QMainWindow):
         date_layout.addWidget(self.date_start)
         dash_label3 = QLabel("—")
         dash_label3.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        dash_label3.setStyleSheet(f"color: #6c757d; margin: 0 {dash_margin}px; font-size: {dash_font_size}px;")
+        dash_label3.setStyleSheet(f"color: #6c757d; margin: 0 {dash_margin}px;")
         date_layout.addWidget(dash_label3)
         date_layout.addWidget(self.date_end)
         basic_filter_layout.addRow("📅 采样日期:", date_layout)
@@ -2515,20 +2671,58 @@ class MainWindow(QMainWindow):
         self.plan_date.setStyleSheet(date_styles)
         basic_filter_layout.addRow("📆 计划调群日:", self.plan_date)
         
-        layout.addWidget(basic_filter_group)
+        tab_layout.addWidget(basic_filter_group)
         
-        # 4. 蛋白率筛选区域
-        protein_filter_group = self.create_special_filter_group("🧪 蛋白率筛选", "protein")
-        layout.addWidget(protein_filter_group)
+        # 添加弹性空间
+        tab_layout.addStretch()
         
-        # 5. 体细胞数筛选区域
-        somatic_filter_group = self.create_special_filter_group("🔬 体细胞数筛选", "somatic")
-        layout.addWidget(somatic_filter_group)
+        self.function_tabs.addTab(tab_widget, "📊 基础数据")
+
+    def create_dhi_filter_tab(self):
+        """创建DHI基础筛选标签页：蛋白筛选、体细胞数筛选、其他筛选项目、未来泌乳天数筛选"""
+        tab_widget = QWidget()
+        tab_layout = QVBoxLayout(tab_widget)
         
-        # 6. 其他筛选项目区域
-        other_filter_group = self.create_card_widget("⚗️ 其他筛选项目")
-        other_filter_layout = QVBoxLayout(getattr(other_filter_group, 'content_widget'))
-        other_filter_layout.setContentsMargins(card_margin, card_margin, card_margin, card_margin)
+        # 获取自适应样式
+        button_styles = self.get_responsive_button_styles()
+        form_styles = self.get_responsive_form_styles()
+        
+        # 使用统一的边距
+        card_margin = self.get_dpi_scaled_size(12)
+        
+        # 1. 蛋白率筛选
+        protein_group = self.create_special_filter_group("🥛 蛋白率筛选", "protein")
+        tab_layout.addWidget(protein_group)
+        
+        # 2. 体细胞数筛选
+        somatic_group = self.create_special_filter_group("🔬 体细胞数筛选", "somatic")
+        tab_layout.addWidget(somatic_group)
+        
+        # 3. 其他筛选项目
+        other_filters_group = self.create_card_widget("📋 其他筛选项目")
+        other_filters_layout = QVBoxLayout(getattr(other_filters_group, 'content_widget'))
+        other_filters_layout.setContentsMargins(card_margin, card_margin, card_margin, card_margin)
+        
+        # 快捷选择按钮
+        buttons_layout = QHBoxLayout()
+        
+        add_common_btn = QPushButton("➕ 快速添加常用项")
+        add_common_btn.setStyleSheet(button_styles['info'])
+        add_common_btn.clicked.connect(self.quick_add_common_filters)
+        buttons_layout.addWidget(add_common_btn)
+        
+        select_all_btn = QPushButton("✅ 全选")
+        select_all_btn.setStyleSheet(button_styles['secondary'])
+        select_all_btn.clicked.connect(self.select_all_filters)
+        buttons_layout.addWidget(select_all_btn)
+        
+        clear_all_btn = QPushButton("❌ 全清")
+        clear_all_btn.setStyleSheet(button_styles['secondary'])
+        clear_all_btn.clicked.connect(self.clear_all_filters)
+        buttons_layout.addWidget(clear_all_btn)
+        
+        buttons_layout.addStretch()
+        other_filters_layout.addLayout(buttons_layout)
         
         # 创建多选界面
         multi_select_widget = QWidget()
@@ -2539,250 +2733,163 @@ class MainWindow(QMainWindow):
         select_label = QLabel("选择要添加的筛选项目（可多选）:")
         select_label.setStyleSheet("color: #495057; font-weight: bold; font-size: 13px;")
         header_layout.addWidget(select_label)
-        
         header_layout.addStretch()
         
-        # 一键添加常用筛选项按钮
-        quick_add_btn = QPushButton("一键添加常用")
-        quick_add_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #28a745;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 6px 12px;
-                font-size: 12px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #218838;
-            }
-            QPushButton:pressed {
-                background-color: #1e7e34;
-            }
-        """)
-        quick_add_btn.clicked.connect(self.quick_add_common_filters)
-        header_layout.addWidget(quick_add_btn)
+        apply_btn = QPushButton("应用选中项目")
+        apply_btn.setStyleSheet(button_styles['success'])
+        apply_btn.clicked.connect(self.apply_selected_filters)
+        header_layout.addWidget(apply_btn)
         
         multi_select_layout.addLayout(header_layout)
         
-        # 创建滚动区域用于显示筛选项复选框
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setMaximumHeight(120)
-        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll_area.setStyleSheet("""
-            QScrollArea {
-                border: 1px solid #dee2e6;
-                border-radius: 4px;
-                background-color: white;
-            }
-            QScrollBar:vertical {
-                background-color: #f8f9fa;
-                width: 12px;
-                border-radius: 6px;
-            }
-            QScrollBar::handle:vertical {
-                background-color: #6c757d;
-                border-radius: 6px;
-                min-height: 20px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background-color: #495057;
-            }
-        """)
-        
-        # 创建筛选项复选框容器
-        checkbox_widget = QWidget()
-        checkbox_layout = QVBoxLayout(checkbox_widget)
-        checkbox_layout.setContentsMargins(10, 5, 10, 5)
-        checkbox_layout.setSpacing(5)
-        
-        # 获取可选筛选项并创建复选框
+        # 筛选项目复选框网格
         self.filter_checkboxes = {}
-        optional_filters = self.processor.rules.get("optional_filters", {})
+        filters_grid = QGridLayout()
         
-        # 获取屏幕DPI信息用于样式
-        screen = QApplication.primaryScreen()
-        dpi_ratio = screen.devicePixelRatio()
-        checkbox_font_size = max(int(12 * dpi_ratio * 0.7), 11)
-        checkbox_spacing = max(int(6 * dpi_ratio * 0.6), 5)
-        checkbox_size = max(int(14 * dpi_ratio * 0.6), 12)
-        checkbox_border_radius = max(int(2 * dpi_ratio * 0.6), 2)
+        # 从配置文件加载可选筛选项
+        available_filters = {
+            'fat_pct': '乳脂率(%)',
+            'lactose_pct': '乳糖率(%)',
+            'milk_yield': '产奶量(Kg)',
+            'lactation_days': '泌乳天数(天)',
+            'solids_pct': '固形物(%)',
+            'fat_protein_ratio': '脂蛋比',
+            'urea_nitrogen': '尿素氮(mg/dl)',
+            'total_fat_pct': '总乳脂(%)',
+            'total_protein_pct': '总蛋白(%)',
+            'mature_equivalent': '成年当量(Kg)',
+            'somatic_cell_score': '体细胞分',
+            'freezing_point': '冰点',
+            'total_bacterial_count': '细菌总数',
+            'dry_matter_intake': '干物质采食量',
+            'net_energy_lactation': '泌乳净能',
+            'metabolizable_protein': '可代谢蛋白',
+            'crude_protein': '粗蛋白',
+            'neutral_detergent_fiber': '中性洗涤纤维',
+            'acid_detergent_fiber': '酸性洗涤纤维',
+            'starch': '淀粉',
+            'ether_extract': '醚提取物',
+            'ash': '灰分',
+            'calcium': '钙',
+            'phosphorus': '磷',
+            'magnesium': '镁',
+            'sodium': '钠',
+            'potassium': '钾',
+            'sulfur': '硫'
+        }
         
-        for filter_key, filter_config in optional_filters.items():
-            chinese_name = filter_config.get("chinese_name", filter_key)
-            
+        row = 0
+        col = 0
+        for filter_key, chinese_name in available_filters.items():
             checkbox = QCheckBox(chinese_name)
             checkbox.setStyleSheet(f"""
                 QCheckBox {{
-                    font-size: {checkbox_font_size}px;
+                    font-size: 12px;
                     color: #495057;
-                    spacing: {checkbox_spacing}px;
-                    padding: 3px;
+                    spacing: 6px;
                 }}
                 QCheckBox::indicator {{
-                    width: {checkbox_size}px;
-                    height: {checkbox_size}px;
+                    width: 14px;
+                    height: 14px;
                     border: 2px solid #ced4da;
-                    border-radius: {checkbox_border_radius}px;
+                    border-radius: 3px;
                     background-color: white;
                 }}
-                QCheckBox::indicator:hover {{
-                    border-color: #80bdff;
-                    background-color: #f8f9fa;
-                }}
                 QCheckBox::indicator:checked {{
-                    background-color: #007bff !important;
-                    border-color: #007bff !important;
-                    image: url(data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAiIGhlaWdodD0iOCIgdmlld0JveD0iMCAwIDEwIDgiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxwYXRoIGQ9Ik0xIDMuNUwzLjUgNkw5IDEiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+Cjwvc3ZnPgo=);
-                }}
-                QCheckBox::indicator:checked:hover {{
-                    background-color: #0056b3 !important;
-                    border-color: #0056b3 !important;
-                }}
-                QCheckBox:hover {{
-                    background-color: #f8f9fa;
-                    border-radius: 3px;
+                    background-color: #007bff;
+                    border-color: #007bff;
                 }}
             """)
-            
-            # 连接信号，当复选框状态改变时自动添加/移除筛选项
             checkbox.toggled.connect(lambda checked, key=filter_key: self.on_filter_checkbox_toggled(key, checked))
             
+            filters_grid.addWidget(checkbox, row, col)
             self.filter_checkboxes[filter_key] = checkbox
-            checkbox_layout.addWidget(checkbox)
+            
+            col += 1
+            if col >= 3:  # 每行3个
+                col = 0
+                row += 1
         
-        checkbox_layout.addStretch()
-        scroll_area.setWidget(checkbox_widget)
-        multi_select_layout.addWidget(scroll_area)
+        multi_select_layout.addLayout(filters_grid)
+        other_filters_layout.addWidget(multi_select_widget)
         
-        # 添加操作按钮行
-        button_layout = QHBoxLayout()
+        # 已添加的筛选项容器
+        added_label = QLabel("已添加的筛选项:")
+        added_label.setStyleSheet("color: #495057; font-weight: bold; font-size: 13px; margin-top: 10px;")
+        other_filters_layout.addWidget(added_label)
         
-        # 全选按钮
-        select_all_btn = QPushButton("全选")
-        select_all_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #17a2b8;
-                color: white;
-                border: none;
-                border-radius: 3px;
-                padding: 4px 8px;
-                font-size: 11px;
-            }
-            QPushButton:hover {
-                background-color: #138496;
-            }
-        """)
-        select_all_btn.clicked.connect(self.select_all_filters)
-        button_layout.addWidget(select_all_btn)
+        # 滚动区域用于显示已添加的筛选项
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setMaximumHeight(200)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         
-        # 清空按钮
-        clear_all_btn = QPushButton("清空")
-        clear_all_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #6c757d;
-                color: white;
-                border: none;
-                border-radius: 3px;
-                padding: 4px 8px;
-                font-size: 11px;
-            }
-            QPushButton:hover {
-                background-color: #545b62;
-            }
-        """)
-        clear_all_btn.clicked.connect(self.clear_all_filters)
-        button_layout.addWidget(clear_all_btn)
+        scroll_widget = QWidget()
+        self.other_filters_layout = QVBoxLayout(scroll_widget)
+        self.other_filters_layout.setContentsMargins(5, 5, 5, 5)
+        self.other_filters_layout.addStretch()
         
-        button_layout.addStretch()
+        scroll_area.setWidget(scroll_widget)
+        other_filters_layout.addWidget(scroll_area)
         
-        # 应用选择按钮
-        apply_btn = QPushButton("应用选择")
-        apply_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #007bff;
-                color: white;
-                border: none;
-                border-radius: 3px;
-                padding: 4px 12px;
-                font-size: 11px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #0056b3;
-            }
-        """)
-        apply_btn.clicked.connect(self.apply_selected_filters)
-        button_layout.addWidget(apply_btn)
+        tab_layout.addWidget(other_filters_group)
         
-        multi_select_layout.addLayout(button_layout)
-        other_filter_layout.addWidget(multi_select_widget)
-        
-        # 动态添加的其他筛选项容器
-        self.other_filters_container = QWidget()
-        self.other_filters_layout = QVBoxLayout(self.other_filters_container)
-        other_filter_layout.addWidget(self.other_filters_container)
-        
-        # 存储已添加的其他筛选项
-        self.added_other_filters = {}
-        
-        layout.addWidget(other_filter_group)
-        
-        # 7. 未来泌乳天数复选框和范围
-        future_days_group = self.create_card_widget("🔮 未来泌乳天数筛选")
+        # 4. 未来泌乳天数筛选
+        future_days_group = self.create_card_widget("📅 未来泌乳天数筛选")
         future_days_layout = QVBoxLayout(getattr(future_days_group, 'content_widget'))
         future_days_layout.setContentsMargins(card_margin, card_margin, card_margin, card_margin)
         
-        # 定义复选框样式变量
-        checkbox_font_size = max(int(13 * dpi_ratio * 0.7), 12)
-        checkbox_spacing = max(int(8 * dpi_ratio * 0.6), 6)
-        checkbox_size = max(int(16 * dpi_ratio * 0.6), 14)
-        checkbox_border_radius = max(int(3 * dpi_ratio * 0.6), 2)
-        
-        # 复选框
+        # 启用开关
         self.future_days_enabled = QCheckBox("启用未来泌乳天数筛选")
         self.future_days_enabled.setChecked(False)
-        self.future_days_enabled.setToolTip("勾选后，会根据设置的范围筛选未来泌乳天数")
         self.future_days_enabled.setStyleSheet(f"""
             QCheckBox {{
-                font-size: {checkbox_font_size}px;
+                font-size: 13px;
                 color: #495057;
-                spacing: {checkbox_spacing}px;
+                spacing: 8px;
+                font-weight: bold;
             }}
             QCheckBox::indicator {{
-                width: {checkbox_size}px;
-                height: {checkbox_size}px;
+                width: 16px;
+                height: 16px;
                 border: 2px solid #ced4da;
-                border-radius: {checkbox_border_radius}px;
+                border-radius: 3px;
                 background-color: white;
             }}
             QCheckBox::indicator:checked {{
-                background-color: #007bff;
-                border-color: #007bff;
-                image: url(data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIiIGhlaWdodD0iOSIgdmlld0JveD0iMCAwIDEyIDkiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxwYXRoIGQ9Ik0xIDQuNUw0LjUgOEwxMSAxIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgo8L3N2Zz4K);
+                background-color: #28a745;
+                border-color: #28a745;
             }}
         """)
         future_days_layout.addWidget(self.future_days_enabled)
         
-        # 范围设置
+        # 天数范围设置
         future_range_layout = QHBoxLayout()
+        
+        range_label = QLabel("未来泌乳天数范围:")
+        range_label.setStyleSheet("color: #495057; font-weight: bold;")
+        future_range_layout.addWidget(range_label)
+        
         self.future_days_min = QSpinBox()
-        self.future_days_min.setRange(1, 9999)
-        self.future_days_min.setValue(1)
+        self.future_days_min.setRange(1, 500)
+        self.future_days_min.setValue(50)
         self.future_days_min.setStyleSheet(form_styles)
-        self.future_days_max = QSpinBox()
-        self.future_days_max.setRange(1, 9999)
-        self.future_days_max.setValue(305)
-        self.future_days_max.setStyleSheet(form_styles)
         future_range_layout.addWidget(self.future_days_min)
+        
         dash_label4 = QLabel("—")
         dash_label4.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        dash_label4.setStyleSheet(f"color: #6c757d; margin: 0 {dash_margin}px; font-size: {dash_font_size}px;")
+        dash_margin = self.get_dpi_scaled_size(8)
+        dash_label4.setStyleSheet(f"color: #6c757d; margin: 0 {dash_margin}px;")
         future_range_layout.addWidget(dash_label4)
+        
+        self.future_days_max = QSpinBox()
+        self.future_days_max.setRange(1, 500)
+        self.future_days_max.setValue(350)
+        self.future_days_max.setStyleSheet(form_styles)
         future_range_layout.addWidget(self.future_days_max)
+        
+        future_range_layout.addStretch()
         
         future_range_widget = QWidget()
         future_range_widget.setLayout(future_range_layout)
@@ -2798,13 +2905,13 @@ class MainWindow(QMainWindow):
         self.future_days_enabled.toggled.connect(toggle_future_days_range)
         toggle_future_days_range()
         
-        layout.addWidget(future_days_group)
+        tab_layout.addWidget(future_days_group)
         
-        # 8. 操作按钮
+        # 5. 操作按钮
         action_group = self.create_card_widget("🚀 操作")
         action_layout = QVBoxLayout(getattr(action_group, 'content_widget'))
         action_layout.setContentsMargins(card_margin, card_margin, card_margin, card_margin)
-        action_spacing = max(int(10 * dpi_ratio), 8)
+        action_spacing = self.get_dpi_scaled_size(10)
         action_layout.setSpacing(action_spacing)
         
         # 筛选按钮容器
@@ -2839,6 +2946,12 @@ class MainWindow(QMainWindow):
         # 筛选进度
         self.filter_progress = QProgressBar()
         self.filter_progress.setVisible(False)
+        
+        progress_border_radius = self.get_dpi_scaled_size(4)
+        progress_padding = self.get_dpi_scaled_size(2)
+        progress_chunk_radius = self.get_dpi_scaled_size(3)
+        min_height = self.get_dpi_scaled_size(20)
+        
         self.filter_progress.setStyleSheet(f"""
             QProgressBar {{
                 border: 1px solid #e0e0e0;
@@ -2846,7 +2959,7 @@ class MainWindow(QMainWindow):
                 text-align: center;
                 padding: {progress_padding}px;
                 background-color: #f8f9fa;
-                min-height: {max(int(20 * dpi_ratio), 16)}px;
+                min-height: {min_height}px;
             }}
             QProgressBar::chunk {{
                 background-color: #ffc107;
@@ -2856,16 +2969,254 @@ class MainWindow(QMainWindow):
         action_layout.addWidget(self.filter_progress)
         
         self.filter_label = QLabel("")
-        filter_label_font_size = max(int(8 * dpi_ratio * 0.5), 8)
-        self.filter_label.setStyleSheet(f"color: #6c757d; font-size: {filter_label_font_size}px;")
+        self.filter_label.setStyleSheet(f"color: #6c757d;")
         action_layout.addWidget(self.filter_label)
         
-        layout.addWidget(action_group)
+        tab_layout.addWidget(action_group)
         
         # 添加弹性空间
-        layout.addStretch()
+        tab_layout.addStretch()
         
-        return panel
+        self.function_tabs.addTab(tab_widget, "🔬 DHI基础筛选")
+    
+    def load_filter_config(self, filter_key):
+        """从配置文件加载筛选项目配置"""
+        try:
+            import yaml
+            with open('rules.yaml', 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f)
+                
+            optional_filters = config.get('optional_filters', {})
+            if filter_key in optional_filters:
+                return optional_filters[filter_key]
+            else:
+                # 返回默认配置
+                return {
+                    'chinese_name': filter_key,
+                    'min': 0.0,
+                    'max': 100.0,
+                    'min_match_months': 3,
+                    'treat_empty_as_match': False
+                }
+        except Exception as e:
+            print(f"加载筛选配置失败: {e}")
+            return {
+                'chinese_name': filter_key,
+                'min': 0.0,
+                'max': 100.0,
+                'min_match_months': 3,
+                'treat_empty_as_match': False
+            }
+
+    def create_mastitis_screening_tab(self):
+        """创建牧场慢性乳房炎感染牛筛查处置标签页"""
+        tab_widget = QWidget()
+        tab_layout = QVBoxLayout(tab_widget)
+        
+        # 获取自适应样式
+        button_styles = self.get_responsive_button_styles()
+        form_styles = self.get_responsive_form_styles()
+        card_margin = self.get_dpi_scaled_size(12)
+        
+        # 1. 系统选择区域
+        system_group = self.create_card_widget("🏥 选择数据管理系统")
+        system_layout = QVBoxLayout(getattr(system_group, 'content_widget'))
+        system_layout.setContentsMargins(card_margin, card_margin, card_margin, card_margin)
+        
+        # 系统类型选择
+        system_selection_layout = QHBoxLayout()
+        
+        self.mastitis_system_group = QWidget()
+        system_radio_layout = QHBoxLayout(self.mastitis_system_group)
+        system_radio_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.yiqiniu_radio = QCheckBox("伊起牛系统")
+        self.huimuyun_radio = QCheckBox("慧牧云系统")
+        self.custom_radio = QCheckBox("其他系统")
+        
+        # 设置为单选模式
+        self.yiqiniu_radio.toggled.connect(lambda checked: self.on_mastitis_system_selected('yiqiniu', checked))
+        self.huimuyun_radio.toggled.connect(lambda checked: self.on_mastitis_system_selected('huimuyun', checked))
+        self.custom_radio.toggled.connect(lambda checked: self.on_mastitis_system_selected('custom', checked))
+        
+        system_radio_layout.addWidget(self.yiqiniu_radio)
+        system_radio_layout.addWidget(self.huimuyun_radio)
+        system_radio_layout.addWidget(self.custom_radio)
+        system_radio_layout.addStretch()
+        
+        system_selection_layout.addWidget(self.mastitis_system_group)
+        system_layout.addLayout(system_selection_layout)
+        
+        tab_layout.addWidget(system_group)
+        
+        # 2. 文件上传区域 - 动态显示
+        self.mastitis_upload_group = self.create_card_widget("📁 上传相关数据文件")
+        self.mastitis_upload_layout = QVBoxLayout(getattr(self.mastitis_upload_group, 'content_widget'))
+        self.mastitis_upload_layout.setContentsMargins(card_margin, card_margin, card_margin, card_margin)
+        
+        # 初始化文件上传控件
+        self.mastitis_file_uploads = {}
+        
+        tab_layout.addWidget(self.mastitis_upload_group)
+        self.mastitis_upload_group.setVisible(False)  # 默认隐藏
+        
+        # 3. 慢性感染牛识别配置
+        chronic_group = self.create_card_widget("🔬 慢性感染牛识别标准")
+        chronic_layout = QFormLayout(getattr(chronic_group, 'content_widget'))
+        chronic_layout.setContentsMargins(card_margin, card_margin, card_margin, card_margin)
+        
+        # 月份选择设置
+        self.chronic_months_widget = QWidget()
+        chronic_months_layout = QGridLayout(self.chronic_months_widget)
+        chronic_months_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # 初始化月份复选框字典
+        self.chronic_month_checkboxes = {}
+        
+        # 默认显示提示信息
+        no_data_label = QLabel("请先上传DHI数据以选择月份")
+        no_data_label.setStyleSheet("color: #6c757d; font-style: italic;")
+        chronic_months_layout.addWidget(no_data_label, 0, 0, 1, 3)
+        
+        chronic_layout.addRow("选择检查月份:", self.chronic_months_widget)
+        
+        # 体细胞数阈值设置
+        scc_threshold_layout = QHBoxLayout()
+        scc_threshold_combo = QComboBox()
+        scc_threshold_combo.addItems(["<", "<=", "=", ">=", ">"])
+        scc_threshold_combo.setCurrentText(">=")
+        scc_threshold_combo.setStyleSheet(form_styles)
+        scc_threshold_combo.setFixedWidth(60)
+        
+        self.scc_threshold_spin = QDoubleSpinBox()
+        self.scc_threshold_spin.setRange(0.1, 100.0)
+        self.scc_threshold_spin.setValue(20.0)
+        self.scc_threshold_spin.setSuffix("万/ml")
+        self.scc_threshold_spin.setDecimals(1)
+        self.scc_threshold_spin.setStyleSheet(form_styles)
+        
+        scc_threshold_layout.addWidget(scc_threshold_combo)
+        scc_threshold_layout.addWidget(self.scc_threshold_spin)
+        scc_threshold_layout.addStretch()
+        
+        scc_threshold_widget = QWidget()
+        scc_threshold_widget.setLayout(scc_threshold_layout)
+        chronic_layout.addRow("体细胞数:", scc_threshold_widget)
+        
+        # 存储阈值比较符号
+        self.scc_threshold_combo = scc_threshold_combo
+        
+        tab_layout.addWidget(chronic_group)
+        
+        # 4. 处置办法配置
+        treatment_group = self.create_card_widget("⚕️ 处置办法配置")
+        treatment_layout = QVBoxLayout(getattr(treatment_group, 'content_widget'))
+        treatment_layout.setContentsMargins(card_margin, card_margin, card_margin, card_margin)
+        
+        # 创建5种处置办法的配置界面
+        self.treatment_configs = {}
+        
+        treatment_methods = [
+            ('cull', '淘汰', '🗑️'),
+            ('isolate', '禁配隔离', '🚫'),
+            ('blind_quarter', '瞎乳区', '👁️'),
+            ('early_dry', '提前干奶', '⏰'),
+            ('treatment', '治疗', '💊')
+        ]
+        
+        for method_key, method_name, icon in treatment_methods:
+            method_widget = self.create_treatment_config_widget(method_key, method_name, icon, form_styles)
+            self.treatment_configs[method_key] = method_widget
+            treatment_layout.addWidget(method_widget)
+        
+        tab_layout.addWidget(treatment_group)
+        
+        # 5. 操作按钮区域
+        action_group = self.create_card_widget("🚀 执行筛查")
+        action_layout = QVBoxLayout(getattr(action_group, 'content_widget'))
+        action_layout.setContentsMargins(card_margin, card_margin, card_margin, card_margin)
+        
+        buttons_layout = QHBoxLayout()
+        
+        self.mastitis_screen_btn = QPushButton("🔍 开始慢性乳房炎筛查")
+        self.mastitis_screen_btn.setStyleSheet(button_styles['primary'])
+        self.mastitis_screen_btn.clicked.connect(self.start_mastitis_screening)
+        self.mastitis_screen_btn.setEnabled(False)
+        buttons_layout.addWidget(self.mastitis_screen_btn)
+        
+        self.mastitis_export_btn = QPushButton("📤 导出筛查结果")
+        self.mastitis_export_btn.setStyleSheet(button_styles['success'])
+        self.mastitis_export_btn.clicked.connect(self.export_mastitis_results)
+        self.mastitis_export_btn.setEnabled(False)
+        buttons_layout.addWidget(self.mastitis_export_btn)
+        
+        buttons_layout.addStretch()
+        action_layout.addLayout(buttons_layout)
+        
+        # 进度显示
+        progress_widget = QWidget()
+        progress_layout = QVBoxLayout(progress_widget)
+        progress_layout.setContentsMargins(0, 5, 0, 5)
+        
+        # 进度条
+        self.mastitis_progress = QProgressBar()
+        self.mastitis_progress.setRange(0, 100)
+        self.mastitis_progress.setValue(0)
+        self.mastitis_progress.setVisible(False)
+        self.mastitis_progress.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #ccc;
+                border-radius: 5px;
+                text-align: center;
+                padding: 1px;
+                background-color: #f0f0f0;
+                height: 25px;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QProgressBar::chunk {
+                background-color: #4CAF50;
+                border-radius: 4px;
+            }
+        """)
+        progress_layout.addWidget(self.mastitis_progress)
+        
+        # 进度状态标签
+        self.progress_status_label = QLabel("")
+        self.progress_status_label.setStyleSheet("font-size: 12px; color: #666; margin-top: 2px;")
+        self.progress_status_label.setVisible(False)
+        self.progress_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        progress_layout.addWidget(self.progress_status_label)
+        
+        action_layout.addWidget(progress_widget)
+        
+        self.mastitis_status_label = QLabel("请选择数据管理系统并上传相关文件")
+        self.mastitis_status_label.setStyleSheet("color: #6c757d; font-size: 14px; padding: 10px;")
+        action_layout.addWidget(self.mastitis_status_label)
+        
+        tab_layout.addWidget(action_group)
+        
+        # 添加弹性空间
+        tab_layout.addStretch()
+        
+        # 初始化变量
+        self.current_mastitis_system = None
+        self.mastitis_screening_results = None
+        
+        self.function_tabs.addTab(tab_widget, "🏥 慢性乳房炎筛查")
+
+    def create_mastitis_monitoring_tab(self):
+        """创建隐形乳房炎月度监测标签页 - 简化版本"""
+        tab_widget = QWidget()
+        tab_layout = QVBoxLayout(tab_widget)
+        
+        placeholder_label = QLabel("隐形乳房炎监测功能正在开发中...")
+        placeholder_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        placeholder_label.setStyleSheet("color: #6c757d; padding: 20px;")
+        tab_layout.addWidget(placeholder_label)
+        
+        tab_layout.addStretch()
+        self.function_tabs.addTab(tab_widget, "👁️ 隐形乳房炎监测")
     
     def create_result_panel(self):
         """创建右侧结果面板"""
@@ -3635,6 +3986,23 @@ class MainWindow(QMainWindow):
         if missing_count > 0:
             status_msg += f"，已补充牛场编号 {missing_count} 个"
         self.statusBar().showMessage(status_msg)
+        
+        # 提取并更新慢性感染牛识别的月份选择（如果有DHI数据）
+        dhi_months = set()
+        for item in self.data_list:
+            df = item['data']
+            if 'sample_date' in df.columns and 'somatic_cell_count' in df.columns:
+                # 从有体细胞数据的文件中提取月份
+                dates = pd.to_datetime(df['sample_date'], errors='coerce').dropna()
+                months = dates.dt.strftime('%Y年%m月').unique()
+                dhi_months.update(months)
+        
+        if dhi_months:
+            sorted_months = sorted(list(dhi_months))
+            print(f"从DHI数据中提取到月份: {sorted_months}")
+            self.update_chronic_months_options(sorted_months)
+        else:
+            print("未找到包含体细胞数据的DHI文件，无法更新月份选择")
     
     def detect_and_display_duplicates(self):
         """检测重复文件并在文件信息框中显示详细信息"""
@@ -4677,31 +5045,8 @@ class MainWindow(QMainWindow):
             try:
                 self._export_formatted_excel(filename)
                 
-                # 创建自定义消息框，包含"打开"按钮
-                msg = QMessageBox(self)
-                msg.setIcon(QMessageBox.Icon.Information)
-                msg.setWindowTitle("导出成功")
-                msg.setText("结果已保存到:")
-                msg.setInformativeText(f"{filename}")
-                
-                # 添加自定义按钮
-                open_btn = msg.addButton("打开文件", QMessageBox.ButtonRole.ActionRole)
-                open_folder_btn = msg.addButton("打开文件夹", QMessageBox.ButtonRole.ActionRole)
-                ok_btn = msg.addButton("确定", QMessageBox.ButtonRole.AcceptRole)
-                
-                # 设置默认按钮
-                msg.setDefaultButton(ok_btn)
-                
-                # 显示对话框并获取点击的按钮
-                result = msg.exec()
-                clicked_button = msg.clickedButton()
-                
-                if clicked_button == open_btn:
-                    # 直接打开文件
-                    self.open_file(filename)
-                elif clicked_button == open_folder_btn:
-                    # 打开文件所在文件夹
-                    self.open_file_folder(filename)
+                # 使用美观的自定义对话框
+                self.show_export_success_dialog("DHI筛选结果已保存到：", filename)
                 
                 self.statusBar().showMessage(f"已导出到: {filename}")
                 
@@ -5224,13 +5569,12 @@ class MainWindow(QMainWindow):
         if checked:
             # 添加筛选项
             if filter_key not in self.added_other_filters:
-                optional_filters = self.processor.rules.get("optional_filters", {})
-                filter_config = optional_filters.get(filter_key, {})
+                # 使用新的配置加载方法
+                filter_config = self.load_filter_config(filter_key)
                 
-                if filter_config:
-                    filter_widget = self.create_other_filter_widget(filter_key, filter_config)
-                    self.other_filters_layout.addWidget(filter_widget)
-                    self.added_other_filters[filter_key] = filter_widget
+                filter_widget = self.create_other_filter_widget(filter_key, filter_config)
+                self.other_filters_layout.insertWidget(self.other_filters_layout.count() - 1, filter_widget)
+                self.added_other_filters[filter_key] = filter_widget
         else:
             # 移除筛选项
             if filter_key in self.added_other_filters:
@@ -5679,13 +6023,1409 @@ class MainWindow(QMainWindow):
                 stats_text += f"  有效数据点: {len(all_monthly_data)} 个\n"
         
         widget.setText(stats_text)
-
-
-class DHIDesktopApp:
-    """DHI桌面应用程序"""
     
-    def __init__(self):
-        self.app = None
+    # ==================== 慢性乳房炎筛查相关方法 ====================
+    
+    def on_mastitis_system_selected(self, system_type: str, checked: bool):
+        """系统类型选择事件处理"""
+        if not checked:
+            return
+        
+        # 确保只能选择一个系统（单选模式）
+        if system_type == 'yiqiniu':
+            self.huimuyun_radio.setChecked(False)
+            self.custom_radio.setChecked(False)
+        elif system_type == 'huimuyun':
+            self.yiqiniu_radio.setChecked(False)
+            self.custom_radio.setChecked(False)
+        elif system_type == 'custom':
+            self.yiqiniu_radio.setChecked(False)
+            self.huimuyun_radio.setChecked(False)
+        
+        self.current_mastitis_system = system_type
+        self.create_mastitis_file_upload_widgets(system_type)
+        self.mastitis_upload_group.setVisible(True)
+        self.update_mastitis_screen_button_state()
+    
+    def create_mastitis_file_upload_widgets(self, system_type: str):
+        """根据系统类型创建文件上传控件"""
+        # 清除现有控件
+        for widget in self.mastitis_file_uploads.values():
+            widget.setParent(None)
+        self.mastitis_file_uploads.clear()
+        
+        # 根据系统类型创建对应的上传控件和字段映射
+        if system_type == 'yiqiniu':
+            files_config = {
+                'cattle_info': {
+                    'name': '牛群基础信息表',
+                    'fields': {
+                        '耳号': '耳号（去掉最前面的"0"）',
+                        '胎次': '胎次（去掉最前面的"0"）', 
+                        '泌乳天数': '泌乳天数',
+                        '繁育状态': '繁育状态',
+                        '在胎天数': '在胎天数',
+                        '最近产犊日期': '最近产犊日期'
+                    }
+                },
+                'milk_yield': {
+                    'name': '奶牛产奶日汇总表',
+                    'fields': {
+                        '耳号': '耳号（去掉最前面的"0"）',
+                        '挤奶日期': '挤奶日期',
+                        '日产量(kg)': '日产量（kg）'
+                    }
+                },
+                'disease': {
+                    'name': '发病查询导出表',
+                    'fields': {
+                        '耳号': '耳号（去掉最前面的"0"）',
+                        '发病日期': '发病日期',
+                        '疾病种类': '疾病种类'
+                    }
+                }
+            }
+        elif system_type == 'huimuyun':
+            files_config = {
+                'cattle_info': {
+                    'name': '牛群基础信息表',
+                    'fields': {
+                        '耳号': '耳号（去掉最前面的"0"）',
+                        '胎次': '胎次（去掉最前面的"0"）',
+                        '泌乳天数': '泌乳天数',
+                        '繁育状态': '繁育状态',
+                        '在胎天数': '怀孕天数',
+                        '最近产犊日期': '产犊日期',
+                        '最近七天奶厅平均奶量': '最近七天奶厅平均奶量'
+                    }
+                },
+                'disease': {
+                    'name': '发病事件管理表',
+                    'fields': {
+                        '耳号': '耳号（去掉最前面的"0"）',
+                        '事件日期': '事件日期',
+                        '事件类型': '事件类型'
+                    }
+                }
+            }
+        elif system_type == 'custom':
+            files_config = {
+                'cattle_info': {
+                    'name': '牛群基础信息表',
+                    'fields': {
+                        '耳号': '耳号',
+                        '胎次': '胎次',
+                        '泌乳天数': '泌乳天数',
+                        '繁育状态': '繁育状态',
+                        '在胎天数': '在胎天数',
+                        '最近产犊日期': '最近产犊日期',
+                        '最近七天奶厅平均奶量': '最近七天奶厅平均奶量'
+                    },
+                    'custom': True
+                },
+                'disease': {
+                    'name': '发病查询导出表',
+                    'fields': {
+                        '耳号': '耳号',
+                        '发病日期': '事件日期',
+                        '疾病种类': '事件类型'
+                    },
+                    'custom': True
+                }
+            }
+        else:
+            return
+        
+        # 创建文件上传控件
+        for file_key, file_config in files_config.items():
+            file_widget = self.create_mastitis_file_upload_widget(file_key, file_config, system_type)
+            self.mastitis_file_uploads[file_key] = file_widget
+            self.mastitis_upload_layout.addWidget(file_widget)
+    
+    def create_mastitis_file_upload_widget(self, file_key: str, file_config: dict, system_type: str):
+        """创建单个文件上传控件"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(15, 15, 15, 15)
+        
+        # 文件名标签
+        name_label = QLabel(f"📄 {file_config['name']}")
+        name_label.setStyleSheet("font-weight: bold; font-size: 14px; color: #2c3e50;")
+        layout.addWidget(name_label)
+        
+        # 字段映射显示
+        if file_config.get('custom', False):
+            # 自定义系统，显示可编辑的字段映射
+            mapping_label = QLabel("字段映射（所需数据 → 表头列名）：")
+            mapping_label.setStyleSheet("font-weight: bold; color: #34495e; margin-top: 8px;")
+            layout.addWidget(mapping_label)
+            
+            # 创建字段映射编辑区域
+            mapping_widget = QWidget()
+            mapping_layout = QVBoxLayout(mapping_widget)
+            mapping_layout.setContentsMargins(0, 0, 0, 0)
+            
+            # 存储映射输入控件
+            mapping_inputs = {}
+            
+            for required_field, default_value in file_config['fields'].items():
+                field_layout = QHBoxLayout()
+                
+                # 所需数据标签
+                field_label = QLabel(f"{required_field}:")
+                field_label.setFixedWidth(120)
+                field_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+                field_layout.addWidget(field_label)
+                
+                # 箭头
+                arrow_label = QLabel("→")
+                arrow_label.setStyleSheet("color: #7f8c8d; font-size: 14px;")
+                field_layout.addWidget(arrow_label)
+                
+                # 输入框
+                input_edit = QLineEdit()
+                input_edit.setPlaceholderText(f"请输入表头列名（如：{default_value}）")
+                input_edit.setStyleSheet("""
+                    QLineEdit {
+                        padding: 4px 8px;
+                        border: 1px solid #bdc3c7;
+                        border-radius: 4px;
+                        background-color: white;
+                    }
+                """)
+                field_layout.addWidget(input_edit)
+                
+                mapping_inputs[required_field] = input_edit
+                mapping_layout.addLayout(field_layout)
+            
+            mapping_widget.setLayout(mapping_layout)
+            layout.addWidget(mapping_widget)
+            
+            # 保存映射输入控件的引用
+            widget.mapping_inputs = mapping_inputs
+            
+        else:
+            # 固定系统，只显示字段映射关系
+            mapping_label = QLabel("字段映射（所需数据 → 表头列名）：")
+            mapping_label.setStyleSheet("font-weight: bold; color: #34495e; margin-top: 8px;")
+            layout.addWidget(mapping_label)
+            
+            # 创建字段映射显示区域
+            mapping_text = []
+            for required_field, table_header in file_config['fields'].items():
+                mapping_text.append(f"• {required_field} → {table_header}")
+            
+            mapping_display = QLabel("\n".join(mapping_text))
+            mapping_display.setStyleSheet("""
+                QLabel {
+                    color: #555;
+                    font-size: 12px;
+                    padding: 8px;
+                    background-color: #f8f9fa;
+                    border: 1px solid #e9ecef;
+                    border-radius: 4px;
+                    margin-bottom: 8px;
+                }
+            """)
+            layout.addWidget(mapping_display)
+        
+        # 分隔线
+        separator = QWidget()
+        separator.setStyleSheet("border-top: 1px solid #dee2e6; margin: 8px 0;")
+        separator.setFixedHeight(1)
+        layout.addWidget(separator)
+        
+        # 文件上传行
+        upload_layout = QHBoxLayout()
+        
+        # 文件路径显示
+        file_path_edit = QLineEdit()
+        file_path_edit.setPlaceholderText("请选择文件...")
+        file_path_edit.setReadOnly(True)
+        file_path_edit.setStyleSheet("""
+            QLineEdit {
+                padding: 8px;
+                border: 2px solid #bdc3c7;
+                border-radius: 4px;
+                background-color: #ecf0f1;
+            }
+        """)
+        upload_layout.addWidget(file_path_edit)
+        
+        # 选择文件按钮
+        select_btn = QPushButton("选择文件")
+        select_btn.setStyleSheet("""
+            QPushButton {
+                padding: 8px 16px;
+                background-color: #3498db;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """)
+        select_btn.clicked.connect(lambda: self.select_mastitis_file(file_key, file_config['name']))
+        upload_layout.addWidget(select_btn)
+        
+        layout.addLayout(upload_layout)
+        
+        # 状态标签
+        status_label = QLabel("未选择")
+        status_label.setStyleSheet("color: #999; font-size: 12px; margin-top: 4px;")
+        layout.addWidget(status_label)
+        
+        # 保存引用
+        widget.file_path_edit = file_path_edit
+        widget.select_btn = select_btn
+        widget.status_label = status_label
+        widget.file_config = file_config
+        widget.file_path = None
+        
+        # 设置样式
+        widget.setStyleSheet("""
+            QWidget {
+                background-color: #f8f9fa;
+                border: 1px solid #dee2e6;
+                border-radius: 8px;
+                margin: 4px;
+            }
+        """)
+        
+        return widget
+    
+    def select_mastitis_file(self, file_key: str, file_name: str):
+        """选择文件"""
+        file_dialog = QFileDialog()
+        file_path, _ = file_dialog.getOpenFileName(
+            self, f"选择{file_name}", "", 
+            "Excel文件 (*.xlsx *.xls);;所有文件 (*)"
+        )
+        
+        if file_path:
+            # 显示进度条
+            self.mastitis_progress.setVisible(True)
+            self.progress_status_label.setVisible(True)
+            self.mastitis_progress.setValue(0)
+            self.progress_status_label.setText("正在处理文件...")
+            
+            widget = self.mastitis_file_uploads[file_key]
+            widget.file_path = file_path
+            widget.file_path_edit.setText(os.path.basename(file_path))
+            widget.status_label.setText(f"已选择: {os.path.basename(file_path)}")
+            widget.status_label.setStyleSheet("color: #28a745; font-size: 12px;")
+            
+            # 更新进度 - 文件选择完成
+            self.mastitis_progress.setValue(20)
+            self.progress_status_label.setText("正在读取文件信息...")
+            
+            # 显示文件信息到右侧面板
+            self.display_mastitis_file_info(file_key, file_name, file_path)
+            
+            # 更新进度 - 文件信息读取完成
+            self.mastitis_progress.setValue(50)
+            
+            # 如果是牛群基础信息表，提取繁殖状态并更新选项
+            if file_key == 'cattle_info':
+                self.progress_status_label.setText("正在提取繁育状态...")
+                self.mastitis_progress.setValue(60)
+                self.extract_and_update_breeding_status(file_path)
+                self.mastitis_progress.setValue(100)
+                self.progress_status_label.setText("繁育状态提取完成")
+            else:
+                self.mastitis_progress.setValue(100)
+                self.progress_status_label.setText("文件处理完成")
+            
+            # 延迟隐藏进度条
+            QTimer.singleShot(2000, lambda: self.hide_progress_bar())
+            
+            self.update_mastitis_screen_button_state()
+    
+    def hide_progress_bar(self):
+        """隐藏进度条"""
+        self.mastitis_progress.setVisible(False)
+        self.progress_status_label.setVisible(False)
+    
+
+    def display_mastitis_file_info(self, file_key: str, file_name: str, file_path: str):
+        """显示慢性乳房炎文件信息到右侧面板"""
+        try:
+            import os
+            import pandas as pd
+            from datetime import datetime
+            
+            # 获取文件基本信息
+            file_size = os.path.getsize(file_path)
+            file_size_mb = file_size / (1024 * 1024)
+            modified_time = datetime.fromtimestamp(os.path.getmtime(file_path))
+            
+            # 读取Excel文件获取数据信息
+            try:
+                if file_key == 'milk_yield' and self.current_mastitis_system == 'yiqiniu':
+                    # 奶牛产奶日汇总表可能有多个sheet
+                    with pd.ExcelFile(file_path) as xls:
+                        sheet_names = xls.sheet_names
+                        total_rows = 0
+                        sheet_info = []
+                        for sheet_name in sheet_names:
+                            df = pd.read_excel(file_path, sheet_name=sheet_name)
+                            total_rows += len(df)
+                            sheet_info.append(f"  - {sheet_name}: {len(df)}行")
+                        
+                        data_info = f"数据信息: {len(sheet_names)}个工作表，共{total_rows}行数据\n"
+                        data_info += "\n".join(sheet_info)
+                else:
+                    # 单个sheet
+                    df = pd.read_excel(file_path)
+                    data_info = f"数据信息: {len(df)}行 × {len(df.columns)}列"
+                    if len(df) > 0:
+                        # 显示前几个列名
+                        columns_preview = ", ".join(df.columns[:5].tolist())
+                        if len(df.columns) > 5:
+                            columns_preview += "..."
+                        data_info += f"\n列名预览: {columns_preview}"
+            except Exception as e:
+                data_info = f"数据信息: 读取失败 - {str(e)}"
+            
+            # 构建信息文本
+            info_text = f"""
+🆕 慢性乳房炎筛查文件上传
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📋 文件类型: {file_name}
+📁 文件名: {os.path.basename(file_path)}
+📊 文件大小: {file_size_mb:.2f} MB
+📅 修改时间: {modified_time.strftime('%Y-%m-%d %H:%M:%S')}
+🗂️ 完整路径: {file_path}
+
+{data_info}
+
+⚙️ 系统类型: {self.current_mastitis_system}
+🔄 状态: 已上传，等待处理
+
+"""
+            
+            # 显示到右侧文件信息面板
+            self.file_info_widget.append(info_text)
+            
+            # 自动切换到文件信息标签页
+            self.tab_widget.setCurrentWidget(self.file_info_widget)
+            
+        except Exception as e:
+            error_text = f"""
+❌ 文件信息获取失败
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📁 文件名: {os.path.basename(file_path)}
+❌ 错误: {str(e)}
+
+"""
+            self.file_info_widget.append(error_text)
+    
+    def extract_and_update_breeding_status(self, file_path: str):
+        """提取牛群基础信息表中的繁殖状态并更新选项"""
+        try:
+            # 在处理过程中显示操作信息
+            self.process_log_widget.append(f"""
+🔄 自动提取繁育状态
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📁 文件: {os.path.basename(file_path)}
+⚙️ 系统: {self.current_mastitis_system}
+🔍 开始提取...
+""")
+            
+            # 切换到处理过程标签页
+            self.tab_widget.setCurrentWidget(self.process_log_widget)
+            
+            # 读取Excel文件
+            self.process_log_widget.append("📖 正在读取Excel文件...")
+            df = pd.read_excel(file_path)
+            self.process_log_widget.append(f"✅ 成功读取文件，共 {len(df)} 行数据")
+            
+            # 根据当前系统类型确定繁殖状态列名
+            breeding_status_col = None
+            if self.current_mastitis_system == 'yiqiniu':
+                breeding_status_col = '繁育状态'
+            elif self.current_mastitis_system == 'huimuyun':
+                breeding_status_col = '繁育状态'
+            elif self.current_mastitis_system == 'custom':
+                # 自定义系统，从字段映射中获取
+                widget = self.mastitis_file_uploads.get('cattle_info')
+                if widget and hasattr(widget, 'mapping_inputs'):
+                    input_widget = widget.mapping_inputs.get('繁育状态')
+                    if input_widget:
+                        breeding_status_col = input_widget.text().strip()
+            
+            self.process_log_widget.append(f"🔍 查找繁育状态列: {breeding_status_col}")
+            
+            if not breeding_status_col:
+                error_msg = "❌ 未找到繁殖状态列名映射"
+                self.process_log_widget.append(error_msg)
+                return
+                
+            if breeding_status_col not in df.columns:
+                error_msg = f"❌ 文件中未找到列 '{breeding_status_col}'"
+                self.process_log_widget.append(f"📋 可用列名: {list(df.columns)}")
+                self.process_log_widget.append(error_msg)
+                return
+            
+            # 提取所有不同的繁殖状态值
+            self.process_log_widget.append("🔍 正在分析繁育状态数据...")
+            unique_statuses = df[breeding_status_col].dropna().unique()
+            unique_statuses = [str(status).strip() for status in unique_statuses if str(status).strip()]
+            unique_statuses = sorted(set(unique_statuses))  # 去重并排序
+            
+            if unique_statuses:
+                success_msg = f"✅ 成功提取繁殖状态选项: {', '.join(unique_statuses)}"
+                self.process_log_widget.append(success_msg)
+                
+                # 更新所有处置办法的繁殖状态选项
+                self.process_log_widget.append("🔄 正在更新处置办法配置...")
+                try:
+                    self.update_breeding_status_options(unique_statuses)
+                    self.process_log_widget.append("✅ 处置办法配置更新完成")
+                except Exception as update_error:
+                    error_msg = f"❌ 更新处置办法配置时出错: {str(update_error)}"
+                    self.process_log_widget.append(error_msg)
+                    print(f"更新处置办法配置时出错: {update_error}")
+            else:
+                warning_msg = "⚠️ 未找到有效的繁殖状态数据"
+                self.process_log_widget.append(warning_msg)
+                
+        except Exception as e:
+            error_msg = f"❌ 提取繁殖状态时出错: {str(e)}"
+            self.process_log_widget.append(error_msg)
+            print(f"提取繁殖状态时出错: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def update_breeding_status_options(self, statuses: List[str]):
+        """更新所有处置办法的繁殖状态选项"""
+        try:
+            print(f"开始更新繁殖状态选项: {statuses}")
+            
+            for method_key, widget in self.treatment_configs.items():
+                print(f"处理处置办法: {method_key}")
+                
+                if hasattr(widget, 'breeding_checkboxes'):
+                    # 清除现有的复选框
+                    print(f"清除现有复选框: {len(widget.breeding_checkboxes)}个")
+                    for cb in widget.breeding_checkboxes.values():
+                        if cb is not None:
+                            cb.setParent(None)
+                    widget.breeding_checkboxes.clear()
+                    
+                    # 找到繁殖状态布局容器 - 使用更简单的方法
+                    breeding_status_widget = None
+                    config_layout = widget.config_widget.layout()
+                    
+                    if config_layout is not None:
+                        # 直接查找标签为"繁殖状态:"的行
+                        for i in range(config_layout.rowCount()):
+                            label_item = config_layout.itemAt(i, QFormLayout.ItemRole.LabelRole)
+                            field_item = config_layout.itemAt(i, QFormLayout.ItemRole.FieldRole)
+                            
+                            if label_item and label_item.widget():
+                                label_text = label_item.widget().text()
+                                if "繁殖状态" in label_text and field_item and field_item.widget():
+                                    breeding_status_widget = field_item.widget()
+                                    print(f"找到繁殖状态控件: {breeding_status_widget}")
+                                    break
+                    
+                    if breeding_status_widget:
+                        # 获取或创建布局
+                        layout = breeding_status_widget.layout()
+                        if layout is None:
+                            # 如果没有布局，创建新的
+                            layout = QGridLayout(breeding_status_widget)
+                            layout.setContentsMargins(0, 0, 0, 0)
+                            print("创建新的网格布局")
+                        else:
+                            # 如果有布局，清空内容
+                            print(f"清空现有布局，有 {layout.count()} 个项目")
+                            while layout.count():
+                                item = layout.takeAt(0)
+                                if item and item.widget():
+                                    item.widget().setParent(None)
+                        
+                        # 重新创建复选框
+                        widget.breeding_checkboxes = {}
+                        print(f"创建 {len(statuses)} 个新的复选框")
+                        for i, status in enumerate(statuses):
+                            cb = QCheckBox(status)
+                            cb.setChecked(True)  # 默认全选
+                            widget.breeding_checkboxes[status] = cb
+                            
+                            # 计算行列位置（每行3个）
+                            row = i // 3
+                            col = i % 3
+                            layout.addWidget(cb, row, col)
+                        
+                        print(f"成功更新 {method_key} 的繁殖状态选项")
+                    else:
+                        print(f"未找到 {method_key} 的繁殖状态控件")
+                else:
+                    print(f"{method_key} 没有 breeding_checkboxes 属性")
+            
+            print("繁殖状态选项更新完成")
+            
+        except Exception as e:
+            print(f"update_breeding_status_options 出错: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+
+    def update_chronic_months_options(self, available_months: List[str]):
+        """更新慢性感染牛识别的月份选择选项"""
+        print(f"开始更新慢性感染牛月份选项: {available_months}")
+        
+        # 清空现有布局
+        layout = self.chronic_months_widget.layout()
+        for i in reversed(range(layout.count())):
+            item = layout.takeAt(i)
+            if item and item.widget():
+                item.widget().deleteLater()
+        
+        # 清空复选框字典
+        self.chronic_month_checkboxes = {}
+        
+        if not available_months:
+            # 没有数据时显示提示信息
+            no_data_label = QLabel("请先上传DHI数据以选择月份")
+            no_data_label.setStyleSheet("color: #6c757d; font-style: italic;")
+            layout.addWidget(no_data_label, 0, 0, 1, 3)
+            print("没有可用月份，显示提示信息")
+            return
+        
+        # 创建月份复选框，按年-月排序
+        sorted_months = sorted(available_months)
+        print(f"按顺序创建 {len(sorted_months)} 个月份复选框")
+        
+        for i, month in enumerate(sorted_months):
+            cb = QCheckBox(month)
+            cb.setChecked(True)  # 默认全选
+            self.chronic_month_checkboxes[month] = cb
+            
+            # 计算行列位置（每行4个）
+            row = i // 4
+            col = i % 4
+            layout.addWidget(cb, row, col)
+        
+        print(f"成功创建 {len(sorted_months)} 个月份复选框")
+        
+        # 添加全选/全不选按钮
+        button_row = (len(sorted_months) - 1) // 4 + 1
+        
+        select_all_btn = QPushButton("全选")
+        select_all_btn.setMaximumWidth(60)
+        select_all_btn.clicked.connect(lambda: self._set_all_chronic_months(True))
+        layout.addWidget(select_all_btn, button_row, 0)
+        
+        select_none_btn = QPushButton("全不选")
+        select_none_btn.setMaximumWidth(60)
+        select_none_btn.clicked.connect(lambda: self._set_all_chronic_months(False))
+        layout.addWidget(select_none_btn, button_row, 1)
+        
+        print("月份选项更新完成")
+
+    def _set_all_chronic_months(self, checked: bool):
+        """设置所有慢性感染牛月份复选框的状态"""
+        for month, cb in self.chronic_month_checkboxes.items():
+            cb.setChecked(checked)
+    
+    def create_treatment_config_widget(self, method_key: str, method_name: str, icon: str, form_styles: str):
+        """创建处置办法配置控件"""
+        widget = QWidget()
+        widget.setStyleSheet("""
+            QWidget {
+                border: 1px solid #e0e0e0;
+                border-radius: 8px;
+                padding: 10px;
+                margin: 5px 0;
+                background-color: #fafafa;
+            }
+        """)
+        
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(15, 15, 15, 15)
+        
+        # 标题行
+        title_layout = QHBoxLayout()
+        
+        # 启用复选框
+        enabled_cb = QCheckBox(f"{icon} {method_name}")
+        enabled_cb.setStyleSheet("font-weight: bold; color: #333;")
+        enabled_cb.setChecked(True)  # 默认启用
+        title_layout.addWidget(enabled_cb)
+        title_layout.addStretch()
+        
+        layout.addLayout(title_layout)
+        
+        # 配置区域（默认显示）
+        config_widget = QWidget()
+        config_layout = QFormLayout(config_widget)
+        config_layout.setContentsMargins(20, 10, 10, 10)
+        
+        # 根据处置办法类型创建对应的配置项
+        if method_key == 'cull':  # 淘汰
+            # 产奶量条件
+            yield_layout = QHBoxLayout()
+            yield_combo = QComboBox()
+            yield_combo.addItems(["<", "<=", "=", ">=", ">"])
+            yield_combo.setCurrentText("<=")
+            yield_combo.setStyleSheet(form_styles)
+            yield_combo.setFixedWidth(60)
+            
+            yield_spin = QDoubleSpinBox()
+            yield_spin.setRange(0, 100)
+            yield_spin.setValue(15)
+            yield_spin.setSuffix("kg")
+            yield_spin.setStyleSheet(form_styles)
+            
+            yield_layout.addWidget(yield_combo)
+            yield_layout.addWidget(yield_spin)
+            yield_layout.addStretch()
+            
+            yield_widget = QWidget()
+            yield_widget.setLayout(yield_layout)
+            config_layout.addRow("产奶量:", yield_widget)
+            widget.yield_combo = yield_combo
+            widget.yield_spin = yield_spin
+            
+        elif method_key == 'isolate':  # 禁配隔离
+            # 产奶量条件
+            yield_layout = QHBoxLayout()
+            yield_combo = QComboBox()
+            yield_combo.addItems(["<", "<=", "=", ">=", ">"])
+            yield_combo.setCurrentText(">=")
+            yield_combo.setStyleSheet(form_styles)
+            yield_combo.setFixedWidth(60)
+            
+            yield_spin = QDoubleSpinBox()
+            yield_spin.setRange(0, 100)
+            yield_spin.setValue(15)
+            yield_spin.setSuffix("kg")
+            yield_spin.setStyleSheet(form_styles)
+            
+            yield_layout.addWidget(yield_combo)
+            yield_layout.addWidget(yield_spin)
+            yield_layout.addStretch()
+            
+            yield_widget = QWidget()
+            yield_widget.setLayout(yield_layout)
+            config_layout.addRow("产奶量:", yield_widget)
+            widget.yield_combo = yield_combo
+            widget.yield_spin = yield_spin
+            
+        elif method_key == 'blind_quarter':  # 瞎乳区
+            # 在胎天数条件
+            gestation_layout = QHBoxLayout()
+            gestation_combo = QComboBox()
+            gestation_combo.addItems(["<", "<=", "=", ">=", ">"])
+            gestation_combo.setCurrentText("<=")
+            gestation_combo.setStyleSheet(form_styles)
+            gestation_combo.setFixedWidth(60)
+            
+            gestation_spin = QSpinBox()
+            gestation_spin.setRange(0, 300)
+            gestation_spin.setValue(180)
+            gestation_spin.setSuffix("天")
+            gestation_spin.setStyleSheet(form_styles)
+            
+            gestation_layout.addWidget(gestation_combo)
+            gestation_layout.addWidget(gestation_spin)
+            gestation_layout.addStretch()
+            
+            gestation_widget = QWidget()
+            gestation_widget.setLayout(gestation_layout)
+            config_layout.addRow("在胎天数:", gestation_widget)
+            widget.gestation_combo = gestation_combo
+            widget.gestation_spin = gestation_spin
+            
+        elif method_key == 'early_dry':  # 提前干奶
+            # 在胎天数条件
+            gestation_layout = QHBoxLayout()
+            gestation_combo = QComboBox()
+            gestation_combo.addItems(["<", "<=", "=", ">=", ">"])
+            gestation_combo.setCurrentText(">=")
+            gestation_combo.setStyleSheet(form_styles)
+            gestation_combo.setFixedWidth(60)
+            
+            gestation_spin = QSpinBox()
+            gestation_spin.setRange(0, 300)
+            gestation_spin.setValue(180)
+            gestation_spin.setSuffix("天")
+            gestation_spin.setStyleSheet(form_styles)
+            
+            gestation_layout.addWidget(gestation_combo)
+            gestation_layout.addWidget(gestation_spin)
+            gestation_layout.addStretch()
+            
+            gestation_widget = QWidget()
+            gestation_widget.setLayout(gestation_layout)
+            config_layout.addRow("在胎天数:", gestation_widget)
+            widget.gestation_combo = gestation_combo
+            widget.gestation_spin = gestation_spin
+        
+        # 公共配置项
+        # 发病次数条件
+        mastitis_layout = QHBoxLayout()
+        mastitis_combo = QComboBox()
+        mastitis_combo.addItems(["<", "<=", "=", ">=", ">"])
+        mastitis_combo.setCurrentText(">=")
+        mastitis_combo.setStyleSheet(form_styles)
+        mastitis_combo.setFixedWidth(60)
+        
+        mastitis_spin = QSpinBox()
+        mastitis_spin.setRange(0, 10)
+        mastitis_spin.setValue(2)
+        mastitis_spin.setSuffix("次")
+        mastitis_spin.setStyleSheet(form_styles)
+        
+        mastitis_layout.addWidget(mastitis_combo)
+        mastitis_layout.addWidget(mastitis_spin)
+        mastitis_layout.addStretch()
+        
+        mastitis_widget = QWidget()
+        mastitis_widget.setLayout(mastitis_layout)
+        config_layout.addRow("发病次数:", mastitis_widget)
+        widget.mastitis_combo = mastitis_combo
+        widget.mastitis_spin = mastitis_spin
+        
+        # 泌乳天数条件
+        lactation_layout = QHBoxLayout()
+        lactation_combo = QComboBox()
+        lactation_combo.addItems(["<", "<=", "=", ">=", ">"])
+        lactation_combo.setCurrentText(">=")
+        lactation_combo.setStyleSheet(form_styles)
+        lactation_combo.setFixedWidth(60)
+        
+        lactation_spin = QSpinBox()
+        lactation_spin.setRange(0, 500)
+        lactation_spin.setValue(200)
+        lactation_spin.setSuffix("天")
+        lactation_spin.setStyleSheet(form_styles)
+        
+        lactation_layout.addWidget(lactation_combo)
+        lactation_layout.addWidget(lactation_spin)
+        lactation_layout.addStretch()
+        
+        lactation_widget = QWidget()
+        lactation_widget.setLayout(lactation_layout)
+        config_layout.addRow("泌乳天数:", lactation_widget)
+        widget.lactation_combo = lactation_combo
+        widget.lactation_spin = lactation_spin
+        
+        # 繁殖状态多选（动态获取）
+        breeding_status_label = QLabel("繁殖状态:")
+        breeding_status_widget = QWidget()
+        breeding_status_layout = QGridLayout(breeding_status_widget)
+        breeding_status_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # 默认状态选项
+        default_statuses = ['产犊', '禁配', '可配', '已配', '产后未配', '初检空怀', '发情未配', '流产未配', '已配未检']
+        widget.breeding_checkboxes = {}
+        
+        for i, status in enumerate(default_statuses):
+            cb = QCheckBox(status)
+            cb.setChecked(True)  # 默认全选
+            widget.breeding_checkboxes[status] = cb
+            
+            # 计算行列位置（每行3个）
+            row = i // 3
+            col = i % 3
+            breeding_status_layout.addWidget(cb, row, col)
+        
+        config_layout.addRow(breeding_status_label, breeding_status_widget)
+        
+        # 启用/禁用配置区域
+        enabled_cb.toggled.connect(lambda checked: config_widget.setVisible(checked))
+        config_widget.setVisible(True)  # 默认显示
+        
+        layout.addWidget(config_widget)
+        
+        # 存储引用
+        widget.enabled_cb = enabled_cb
+        widget.config_widget = config_widget
+        
+        return widget
+    
+    def update_mastitis_screen_button_state(self):
+        """更新筛查按钮状态"""
+        # 检查系统选择和文件上传状态
+        system_selected = self.current_mastitis_system is not None
+        
+        if not system_selected:
+            self.mastitis_screen_btn.setEnabled(False)
+            self.mastitis_status_label.setText("请选择数据管理系统")
+            return
+        
+        # 检查文件上传状态
+        all_files_uploaded = True
+        missing_files = []
+        
+        for file_key, widget in self.mastitis_file_uploads.items():
+            if not hasattr(widget, 'file_path') or widget.file_path is None:
+                all_files_uploaded = False
+                missing_files.append(file_key)
+        
+        if not all_files_uploaded:
+            self.mastitis_screen_btn.setEnabled(False)
+            self.mastitis_status_label.setText(f"请上传缺失的文件: {', '.join(missing_files)}")
+            return
+        
+        # 检查DHI数据是否已上传
+        dhi_data_available = hasattr(self, 'data_list') and self.data_list
+        
+        if not dhi_data_available:
+            self.mastitis_screen_btn.setEnabled(False)
+            self.mastitis_status_label.setText("请先在基础数据标签页上传DHI报告")
+            return
+        
+        # 所有条件满足
+        self.mastitis_screen_btn.setEnabled(True)
+        self.mastitis_status_label.setText("准备就绪，可以开始筛查")
+    
+    def start_mastitis_screening(self):
+        """开始慢性乳房炎筛查"""
+        try:
+            # 清空右侧处理过程面板并切换到该标签页
+            self.process_log_widget.clear()
+            self.tab_widget.setCurrentWidget(self.process_log_widget)
+            
+            # 显示开始信息
+            start_message = f"""
+🏥 慢性乳房炎筛查开始
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⚙️ 系统类型: {self.current_mastitis_system}
+📅 开始时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+🔄 正在处理数据文件...
+"""
+            self.process_log_widget.append(start_message)
+            
+            self.mastitis_status_label.setText("正在处理数据文件...")
+            self.mastitis_progress.setVisible(True)
+            self.progress_status_label.setVisible(True)
+            self.mastitis_progress.setValue(0)
+            self.progress_status_label.setText("步骤 1/8: 收集文件路径...")
+            
+            # 收集文件路径和字段映射
+            file_paths = {}
+            field_mappings = {}
+            
+            for file_key, widget in self.mastitis_file_uploads.items():
+                file_paths[file_key] = widget.file_path
+                
+                # 如果是自定义系统，收集字段映射
+                if hasattr(widget, 'mapping_inputs'):
+                    field_mappings[file_key] = {}
+                    for field, input_widget in widget.mapping_inputs.items():
+                        column_name = input_widget.text().strip()
+                        if column_name:
+                            field_mappings[file_key][field] = column_name
+            
+            # 处理系统文件
+            self.mastitis_progress.setValue(10)
+            self.progress_status_label.setText("步骤 2/8: 处理系统文件...")
+            self.process_log_widget.append("📂 开始处理系统文件...")
+            success, message, processed_data = self.data_processor.process_mastitis_system_files(
+                self.current_mastitis_system, file_paths, field_mappings
+            )
+            
+            if not success:
+                error_msg = f"❌ 文件处理失败: {message}"
+                self.process_log_widget.append(error_msg)
+                QMessageBox.warning(self, "文件处理失败", message)
+                self.mastitis_progress.setVisible(False)
+                self.progress_status_label.setVisible(False)
+                return
+            
+            self.process_log_widget.append(f"✅ 系统文件处理成功: {message}")
+            self.mastitis_progress.setValue(30)
+            self.progress_status_label.setText("步骤 3/8: 计算最近7天奶量...")
+            self.mastitis_status_label.setText("正在计算关键指标...")
+            self.process_log_widget.append("🧮 正在计算关键指标...")
+            
+            # 计算最近7天平均奶量（仅伊起牛系统需要）
+            if self.current_mastitis_system == 'yiqiniu':
+                self.process_log_widget.append("🥛 计算最近7天平均奶量...")
+                milk_yield_df = self.data_processor.calculate_recent_7day_avg_yield(processed_data['milk_yield'])
+                # 合并到牛群信息中
+                processed_data['cattle_info'] = processed_data['cattle_info'].merge(
+                    milk_yield_df, on='ear_tag', how='left'
+                )
+                self.process_log_widget.append(f"✅ 完成{len(milk_yield_df)}头牛的奶量计算")
+            
+            self.mastitis_progress.setValue(50)
+            self.progress_status_label.setText("步骤 4/8: 统计乳房炎发病...")
+            
+            # 计算乳房炎发病次数
+            self.process_log_widget.append("🦠 计算乳房炎发病次数...")
+            mastitis_count_df = self.data_processor.calculate_mastitis_count_per_lactation(
+                processed_data['cattle_info'], processed_data['disease']
+            )
+            
+            # 合并到牛群信息中
+            processed_data['cattle_info'] = processed_data['cattle_info'].merge(
+                mastitis_count_df, on='ear_tag', how='left'
+            )
+            
+            affected_cows = len(mastitis_count_df[mastitis_count_df['mastitis_count'] > 0])
+            total_cases = mastitis_count_df['mastitis_count'].sum()
+            self.process_log_widget.append(f"✅ 发病统计完成: {affected_cows}头牛发病，共{total_cases}次")
+            
+            self.mastitis_progress.setValue(70)
+            self.progress_status_label.setText("步骤 6/8: 识别慢性感染牛...")
+            self.mastitis_status_label.setText("正在识别慢性感染牛...")
+            self.process_log_widget.append("🔬 识别慢性感染牛...")
+            
+            # 收集选中的月份
+            selected_months = [month for month, cb in self.chronic_month_checkboxes.items() if cb.isChecked()]
+            scc_operator = self.scc_threshold_combo.currentText()
+            scc_threshold = self.scc_threshold_spin.value()
+            
+            if not selected_months:
+                error_msg = "❌ 请至少选择一个月份进行慢性感染牛识别"
+                self.process_log_widget.append(error_msg)
+                QMessageBox.warning(self, "月份选择错误", "请至少选择一个月份进行慢性感染牛识别")
+                self.mastitis_progress.setVisible(False)
+                self.progress_status_label.setVisible(False)
+                return
+            
+            self.process_log_widget.append(f"🗓️ 检查月份: {', '.join(selected_months)}")
+            self.process_log_widget.append(f"🔢 体细胞数条件: {scc_operator} {scc_threshold}万/ml")
+            
+            # 识别慢性感染牛
+            chronic_mastitis_df = self.data_processor.identify_chronic_mastitis_cows(
+                self.data_list,
+                selected_months,
+                scc_threshold,
+                scc_operator
+            )
+            
+            chronic_count = len(chronic_mastitis_df[chronic_mastitis_df['chronic_mastitis']])
+            self.process_log_widget.append(f"✅ 慢性感染识别完成: {chronic_count}头牛被识别为慢性感染")
+            
+            # 将慢性感染结果合并到基础数据中
+            if not chronic_mastitis_df.empty:
+                # 确定合并字段
+                cattle_info_columns = processed_data['cattle_info'].columns
+                chronic_columns = chronic_mastitis_df.columns
+                
+                if 'management_id' in cattle_info_columns and 'management_id' in chronic_columns:
+                    merge_key = 'management_id'
+                elif 'ear_tag' in cattle_info_columns and 'ear_tag' in chronic_columns:
+                    merge_key = 'ear_tag'
+                else:
+                    # 如果没有直接匹配的字段，尝试创建匹配字段
+                    if 'ear_tag' in cattle_info_columns and 'management_id' in chronic_columns:
+                        # 牛群信息用ear_tag，慢性感染结果用management_id，尝试匹配
+                        merge_key = 'ear_tag'  # 使用ear_tag作为主键
+                        chronic_mastitis_df['ear_tag'] = chronic_mastitis_df['management_id']
+                    else:
+                        self.process_log_widget.append("❌ 无法找到合适的字段合并慢性感染结果")
+                        processed_data['cattle_info']['chronic_mastitis'] = False
+                        merge_key = None
+                
+                if merge_key:
+                    processed_data['cattle_info'] = processed_data['cattle_info'].merge(
+                        chronic_mastitis_df, 
+                        left_on=merge_key, 
+                        right_on=merge_key, 
+                        how='left'
+                    )
+                    # 填充缺失值为False（非慢性感染）
+                    processed_data['cattle_info']['chronic_mastitis'] = processed_data['cattle_info']['chronic_mastitis'].fillna(False)
+                    self.process_log_widget.append(f"✅ 慢性感染结果已使用{merge_key}字段合并到基础数据中")
+            else:
+                # 如果没有慢性感染牛，所有牛的chronic_mastitis都设为False
+                processed_data['cattle_info']['chronic_mastitis'] = False
+                self.process_log_widget.append("ℹ️ 未发现慢性感染牛，所有牛的chronic_mastitis设为False")
+            
+            self.mastitis_progress.setValue(85)
+            self.progress_status_label.setText("步骤 7/8: 应用处置办法...")
+            self.mastitis_status_label.setText("正在应用处置办法...")
+            self.process_log_widget.append("⚖️ 应用处置办法判断...")
+            
+            # 收集处置办法配置
+            treatment_config = self.build_treatment_config()
+            enabled_treatments = [k for k, v in treatment_config.items() if v.get('enabled', False)]
+            self.process_log_widget.append(f"📋 启用的处置办法: {', '.join(enabled_treatments)}")
+            
+            # 应用处置办法判断（只对慢性感染牛进行判断）
+            final_results = self.data_processor.apply_treatment_decisions(
+                processed_data['cattle_info'], treatment_config
+            )
+            
+            self.mastitis_progress.setValue(95)
+            self.progress_status_label.setText("步骤 8/8: 生成筛查报告...")
+            self.process_log_widget.append("📊 生成筛查报告...")
+            
+            # 生成筛查报告
+            screening_report = self.data_processor.create_mastitis_screening_report(
+                final_results, 
+                selected_months, 
+                self.data_list
+            )
+            
+            self.mastitis_progress.setValue(100)
+            self.progress_status_label.setText("筛查完成！")
+            # 延迟隐藏进度条
+            QTimer.singleShot(3000, lambda: self.hide_progress_bar())
+            
+            completion_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            
+            if not screening_report.empty:
+                self.mastitis_screening_results = screening_report
+                self.mastitis_export_btn.setEnabled(True)
+                result_message = f"✅ 筛查完成！发现{len(screening_report)}头牛需要处置"
+                self.mastitis_status_label.setText(result_message)
+                
+                self.process_log_widget.append(f"""
+{result_message}
+📅 完成时间: {completion_time}
+📊 筛查结果已显示在右侧"筛选结果"标签页
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 慢性乳房炎筛查任务完成
+""")
+                
+                # 显示结果到右侧筛选结果表格
+                self.display_mastitis_results_in_table(screening_report)
+            else:
+                no_result_message = "✅ 筛查完成，未发现需要处置的牛只"
+                self.mastitis_status_label.setText(no_result_message)
+                self.process_log_widget.append(f"""
+{no_result_message}
+📅 完成时间: {completion_time}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 慢性乳房炎筛查任务完成
+""")
+            
+        except Exception as e:
+            error_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            error_message = f"""
+❌ 筛查过程中出现错误
+📅 错误时间: {error_time}
+🔍 错误详情: {str(e)}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+❌ 慢性乳房炎筛查任务失败
+"""
+            self.process_log_widget.append(error_message)
+            self.mastitis_progress.setVisible(False)
+            QMessageBox.critical(self, "筛查失败", f"筛查过程中出现错误：{str(e)}")
+            self.mastitis_status_label.setText("筛查失败")
+    
+    def display_mastitis_results_in_table(self, results_df):
+        """将慢性乳房炎筛查结果显示到右侧筛选结果表格"""
+        try:
+            # 切换到筛选结果标签页
+            self.tab_widget.setCurrentWidget(self.result_table)
+            
+            # 设置表格行列数
+            self.result_table.setRowCount(len(results_df))
+            self.result_table.setColumnCount(len(results_df.columns))
+            
+            # 设置表头
+            self.result_table.setHorizontalHeaderLabels(results_df.columns.tolist())
+            
+            # 填充数据
+            for i in range(len(results_df)):
+                for j, value in enumerate(results_df.iloc[i]):
+                    item = QTableWidgetItem(str(value) if pd.notna(value) else "")
+                    
+                    # 为不同的处置办法设置不同的背景色
+                    if j == results_df.columns.get_loc('推荐处置办法') if '推荐处置办法' in results_df.columns else -1:
+                        if '淘汰' in str(value):
+                            item.setBackground(QColor(255, 235, 238))  # 淡红色
+                        elif '禁配隔离' in str(value):
+                            item.setBackground(QColor(255, 243, 205))  # 淡橙色
+                        elif '瞎乳区' in str(value):
+                            item.setBackground(QColor(217, 237, 247))  # 淡蓝色
+                        elif '提前干奶' in str(value):
+                            item.setBackground(QColor(230, 247, 236))  # 淡绿色
+                        elif '治疗' in str(value):
+                            item.setBackground(QColor(248, 249, 250))  # 淡灰色
+                    
+                    self.result_table.setItem(i, j, item)
+            
+            # 调整列宽
+            self.result_table.resizeColumnsToContents()
+            
+            # 限制列宽最大值
+            for col in range(self.result_table.columnCount()):
+                if self.result_table.columnWidth(col) > 200:
+                    self.result_table.setColumnWidth(col, 200)
+            
+            # 启用排序
+            self.result_table.setSortingEnabled(True)
+            
+            # 在处理过程中添加结果说明
+            result_summary = f"""
+📊 结果已显示在筛选结果表格中
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🎯 筛查结果摘要:
+• 总计: {len(results_df)} 头牛需要处置
+• 数据列: {len(results_df.columns)} 个字段
+• 表格支持点击列头排序
+
+💡 处置办法颜色说明:
+🔴 淘汰 - 淡红色背景
+🟠 禁配隔离 - 淡橙色背景  
+🔵 瞎乳区 - 淡蓝色背景
+🟢 提前干奶 - 淡绿色背景
+⚪ 治疗 - 淡灰色背景
+"""
+            self.process_log_widget.append(result_summary)
+            
+        except Exception as e:
+            error_msg = f"❌ 显示筛查结果时出错: {str(e)}"
+            self.process_log_widget.append(error_msg)
+            print(f"显示筛查结果时出错: {e}")
+    
+    def build_treatment_config(self) -> Dict[str, Any]:
+        """构建处置办法配置"""
+        config = {}
+        
+        for method_key, widget in self.treatment_configs.items():
+            if widget.enabled_cb.isChecked():
+                method_config = {
+                    'enabled': True,
+                    'mastitis_operator': widget.mastitis_combo.currentText(),
+                    'mastitis_value': widget.mastitis_spin.value(),
+                    'lactation_operator': widget.lactation_combo.currentText(),
+                    'lactation_value': widget.lactation_spin.value(),
+                    'breeding_status': [status for status, cb in widget.breeding_checkboxes.items() if cb.isChecked()]
+                }
+                
+                # 添加特定配置
+                if method_key == 'cull' and hasattr(widget, 'yield_combo'):
+                    method_config['yield_operator'] = widget.yield_combo.currentText()
+                    method_config['yield_value'] = widget.yield_spin.value()
+                elif method_key == 'isolate' and hasattr(widget, 'yield_combo'):
+                    method_config['yield_operator'] = widget.yield_combo.currentText()
+                    method_config['yield_value'] = widget.yield_spin.value()
+                elif method_key == 'blind_quarter' and hasattr(widget, 'gestation_combo'):
+                    method_config['gestation_operator'] = widget.gestation_combo.currentText()
+                    method_config['gestation_value'] = widget.gestation_spin.value()
+                elif method_key == 'early_dry' and hasattr(widget, 'gestation_combo'):
+                    method_config['gestation_operator'] = widget.gestation_combo.currentText()
+                    method_config['gestation_value'] = widget.gestation_spin.value()
+                
+                config[method_key] = method_config
+            else:
+                config[method_key] = {'enabled': False}
+        
+        return config
+    
+    def show_mastitis_results_preview(self, results_df):
+        """显示筛查结果预览"""
+        if results_df.empty:
+            return
+        
+        # 创建预览对话框
+        dialog = QDialog(self)
+        dialog.setWindowTitle("慢性乳房炎筛查结果预览")
+        dialog.resize(1000, 600)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # 统计信息
+        stats_label = QLabel(f"共发现 {len(results_df)} 头牛需要处置")
+        stats_label.setStyleSheet("font-weight: bold; font-size: 16px; padding: 10px;")
+        layout.addWidget(stats_label)
+        
+        # 结果表格
+        table = QTableWidget()
+        table.setRowCount(min(len(results_df), 100))  # 最多显示100行
+        table.setColumnCount(len(results_df.columns))
+        table.setHorizontalHeaderLabels(results_df.columns.tolist())
+        
+        # 填充数据
+        for i in range(min(len(results_df), 100)):
+            for j, value in enumerate(results_df.iloc[i]):
+                item = QTableWidgetItem(str(value) if pd.notna(value) else "")
+                table.setItem(i, j, item)
+        
+        # 自适应列宽
+        table.resizeColumnsToContents()
+        layout.addWidget(table)
+        
+        # 按钮
+        button_layout = QHBoxLayout()
+        close_btn = QPushButton("关闭")
+        close_btn.clicked.connect(dialog.accept)
+        export_btn = QPushButton("导出完整结果")
+        export_btn.clicked.connect(lambda: [dialog.accept(), self.export_mastitis_results()])
+        
+        button_layout.addStretch()
+        button_layout.addWidget(close_btn)
+        button_layout.addWidget(export_btn)
+        layout.addLayout(button_layout)
+        
+        dialog.exec()
+    
+    def export_mastitis_results(self):
+        """导出慢性乳房炎筛查结果"""
+        if self.mastitis_screening_results is None or self.mastitis_screening_results.empty:
+            QMessageBox.warning(self, "导出失败", "没有筛查结果可以导出")
+            return
+        
+        # 选择保存路径
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_filename = f"慢性乳房炎筛查结果_{timestamp}.xlsx"
+        
+        file_dialog = QFileDialog()
+        file_path, _ = file_dialog.getSaveFileName(
+            self, "保存筛查结果", default_filename, 
+            "Excel文件 (*.xlsx);;所有文件 (*)"
+        )
+        
+        if file_path:
+            try:
+                success = self.data_processor.export_mastitis_screening_results(
+                    self.mastitis_screening_results, file_path
+                )
+                
+                if success:
+                    self.show_export_success_dialog("筛查结果已保存到：", file_path)
+                else:
+                    QMessageBox.warning(self, "导出失败", "导出过程中出现错误")
+                    
+            except Exception as e:
+                QMessageBox.critical(self, "导出失败", f"导出时出现错误：{str(e)}")
+
+    def show_export_success_dialog(self, message: str, file_path: str):
+        """显示导出成功对话框，包含打开文件和打开文件夹按钮"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("导出成功")
+        dialog.setFixedSize(500, 200)
+        dialog.setWindowIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxInformation))
+        
+        # 主布局
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(20)
+        layout.setContentsMargins(30, 30, 30, 30)
+        
+        # 成功图标和消息
+        message_layout = QHBoxLayout()
+        
+        # 成功图标
+        icon_label = QLabel()
+        icon_pixmap = self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxInformation).pixmap(48, 48)
+        icon_label.setPixmap(icon_pixmap)
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignTop)
+        
+        # 消息文本
+        message_label = QLabel(f"{message}\n{file_path}")
+        message_label.setWordWrap(True)
+        message_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        message_label.setStyleSheet("font-size: 14px; color: #333333;")
+        
+        message_layout.addWidget(icon_label)
+        message_layout.addWidget(message_label)
+        message_layout.addStretch()
+        
+        layout.addLayout(message_layout)
+        
+        # 按钮布局
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(10)
+        
+        # 打开文件按钮
+        open_file_btn = QPushButton("📄 打开文件")
+        open_file_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 6px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+            QPushButton:pressed {
+                background-color: #3d8b40;
+            }
+        """)
+        open_file_btn.clicked.connect(lambda: self.open_file(file_path))
+        
+        # 打开文件夹按钮
+        open_folder_btn = QPushButton("📁 打开文件夹")
+        open_folder_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 6px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+            QPushButton:pressed {
+                background-color: #1565C0;
+            }
+        """)
+        open_folder_btn.clicked.connect(lambda: self.open_file_folder(file_path))
+        
+        # 确定按钮
+        ok_btn = QPushButton("确定")
+        ok_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #757575;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 6px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #616161;
+            }
+            QPushButton:pressed {
+                background-color: #424242;
+            }
+        """)
+        ok_btn.clicked.connect(dialog.accept)
+        
+        # 添加按钮到布局
+        button_layout.addWidget(open_file_btn)
+        button_layout.addWidget(open_folder_btn)
+        button_layout.addStretch()
+        button_layout.addWidget(ok_btn)
+        
+        layout.addLayout(button_layout)
+        
+        # 设置对话框样式
+        dialog.setStyleSheet("""
+            QDialog {
+                background-color: #f8f9fa;
+                border: 1px solid #dee2e6;
+                border-radius: 8px;
+            }
+            QLabel {
+                background-color: transparent;
+            }
+        """)
+        
+        # 显示对话框
+        dialog.exec()
+
 
 class DHIDesktopApp:
     """DHI桌面应用程序"""
@@ -5717,7 +7457,7 @@ class DHIDesktopApp:
             
             # 创建主窗口
             self.window = MainWindow()
-            self.window.show()
+            self.window.showMaximized()  # 自动最大化显示
             
             # 运行事件循环
             return self.app.exec()

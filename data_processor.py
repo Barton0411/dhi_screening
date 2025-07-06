@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 class DataProcessor:
     """数据处理核心类"""
     
-    def __init__(self, rules_file: str = "rules.yaml", config_file: str = "config.yaml", temp_dir: str = None):
+    def __init__(self, rules_file: str = "rules.yaml", config_file: str = "config.yaml", temp_dir: Optional[str] = None):
         # 确保始终从项目根目录加载配置文件
         base_dir = os.path.dirname(os.path.abspath(__file__))
         rules_path = rules_file if os.path.isabs(rules_file) else os.path.join(base_dir, rules_file)
@@ -30,7 +30,7 @@ class DataProcessor:
         if temp_dir:
             self.temp_dir = temp_dir
         else:
-            self.temp_dir = self.config.get("upload", {}).get("temp_dir", "./temp")
+            self.temp_dir = str(self.config.get("upload", {}).get("temp_dir", "./temp"))
         
         os.makedirs(self.temp_dir, exist_ok=True)
         
@@ -2067,8 +2067,7 @@ class DataProcessor:
                                     excel_debug = self.debug_excel_processing(os.path.join(root, file), first_excel)
                                     debug_info["processing_steps"].extend(excel_debug["processing_steps"])
                                     break
-                            if excel_path:
-                                break
+                            break
                     else:
                         debug_info["processing_steps"].append({
                             "step": "4. 处理Excel文件",
@@ -2723,3 +2722,1300 @@ class DataProcessor:
             'min_match_months': 1,
             'treat_empty_as_match': False
         }
+
+    # ==================== 慢性乳房炎筛查相关方法 ====================
+    
+    def process_mastitis_system_files(self, system_type: str, file_paths: Dict[str, str], field_mappings: Dict[str, Dict[str, str]] = None) -> Tuple[bool, str, Dict[str, pd.DataFrame]]:
+        """处理不同系统的慢性乳房炎筛查相关文件
+        
+        Args:
+            system_type: 系统类型 ('yiqiniu', 'huimuyun', 'custom')
+            file_paths: 文件路径字典，键为文件类型，值为文件路径
+            field_mappings: 字段映射字典，仅用于自定义系统
+            
+        Returns:
+            (success, message, processed_data)
+            processed_data包含: {
+                'cattle_info': 牛群基础信息DataFrame,
+                'milk_yield': 奶牛产奶日汇总DataFrame (仅伊起牛),
+                'disease': 发病查询导出DataFrame
+            }
+        """
+        try:
+            processed_data = {}
+            
+            if system_type == 'yiqiniu':
+                # 伊起牛系统：需要3个表
+                required_files = ['cattle_info', 'milk_yield', 'disease']
+                for file_type in required_files:
+                    if file_type not in file_paths:
+                        return False, f"伊起牛系统缺少{file_type}文件", {}
+                
+                # 处理牛群基础信息表
+                success, msg, cattle_df = self._process_yiqiniu_cattle_info(file_paths['cattle_info'])
+                if not success:
+                    return False, f"处理牛群基础信息表失败: {msg}", {}
+                processed_data['cattle_info'] = cattle_df
+                
+                # 处理奶牛产奶日汇总表（多个sheet）
+                success, msg, milk_df = self._process_yiqiniu_milk_yield(file_paths['milk_yield'])
+                if not success:
+                    return False, f"处理奶牛产奶日汇总表失败: {msg}", {}
+                processed_data['milk_yield'] = milk_df
+                
+                # 处理发病查询导出表
+                success, msg, disease_df = self._process_yiqiniu_disease(file_paths['disease'])
+                if not success:
+                    return False, f"处理发病查询导出表失败: {msg}", {}
+                processed_data['disease'] = disease_df
+                
+            elif system_type == 'huimuyun':
+                # 慧牧云系统：需要2个表
+                required_files = ['cattle_info', 'disease']
+                for file_type in required_files:
+                    if file_type not in file_paths:
+                        return False, f"慧牧云系统缺少{file_type}文件", {}
+                
+                # 处理牛群数据管理表
+                success, msg, cattle_df = self._process_huimuyun_cattle_info(file_paths['cattle_info'])
+                if not success:
+                    return False, f"处理牛群数据管理表失败: {msg}", {}
+                processed_data['cattle_info'] = cattle_df
+                
+                # 处理发病事件管理表
+                success, msg, disease_df = self._process_huimuyun_disease(file_paths['disease'])
+                if not success:
+                    return False, f"处理发病事件管理表失败: {msg}", {}
+                processed_data['disease'] = disease_df
+                
+            elif system_type == 'custom':
+                # 自定义系统：用户自定义字段映射
+                if not field_mappings:
+                    return False, "自定义系统需要字段映射配置", {}
+                
+                required_files = ['cattle_info', 'disease']
+                for file_type in required_files:
+                    if file_type not in file_paths:
+                        return False, f"自定义系统缺少{file_type}文件", {}
+                
+                # 处理牛群基础信息表
+                success, msg, cattle_df = self._process_custom_cattle_info(file_paths['cattle_info'], field_mappings.get('cattle_info', {}))
+                if not success:
+                    return False, f"处理牛群基础信息表失败: {msg}", {}
+                processed_data['cattle_info'] = cattle_df
+                
+                # 处理发病查询导出表
+                success, msg, disease_df = self._process_custom_disease(file_paths['disease'], field_mappings.get('disease', {}))
+                if not success:
+                    return False, f"处理发病查询导出表失败: {msg}", {}
+                processed_data['disease'] = disease_df
+            
+            return True, f"成功处理{system_type}系统文件", processed_data
+            
+        except Exception as e:
+            logger.error(f"处理{system_type}系统文件时出错: {e}")
+            return False, f"处理文件时出错: {str(e)}", {}
+    
+    def _process_yiqiniu_cattle_info(self, file_path: str) -> Tuple[bool, str, Optional[pd.DataFrame]]:
+        """处理伊起牛系统的牛群基础信息表"""
+        try:
+            df = pd.read_excel(file_path)
+            logger.info(f"伊起牛牛群基础信息表原始列名: {list(df.columns)}")
+            
+            # 检查必要列
+            required_columns = ['耳号', '胎次', '泌乳天数', '繁育状态', '在胎天数', '最近产犊日期']
+            missing_columns = [col for col in required_columns if col not in df.columns]
+            
+            if missing_columns:
+                return False, f"缺少必要列: {missing_columns}", None
+            
+            # 标准化数据
+            result_df = pd.DataFrame()
+            result_df['ear_tag'] = df['耳号'].astype(str).str.lstrip('0').replace('', '0')  # 去前导零
+            result_df['parity'] = pd.to_numeric(df['胎次'], errors='coerce')
+            result_df['lactation_days'] = pd.to_numeric(df['泌乳天数'], errors='coerce')
+            result_df['breeding_status'] = df['繁育状态'].astype(str)
+            result_df['gestation_days'] = pd.to_numeric(df['在胎天数'], errors='coerce')
+            result_df['last_calving_date'] = pd.to_datetime(df['最近产犊日期'], errors='coerce')
+            
+            # 清理数据
+            result_df = result_df.dropna(subset=['ear_tag'])
+            result_df = result_df[result_df['ear_tag'] != 'nan']
+            
+            logger.info(f"伊起牛牛群基础信息表处理完成: {len(result_df)}条记录")
+            return True, f"成功处理{len(result_df)}条牛群基础信息", result_df
+            
+        except Exception as e:
+            logger.error(f"处理伊起牛牛群基础信息表出错: {e}")
+            return False, str(e), None
+    
+    def _process_yiqiniu_milk_yield(self, file_path: str) -> Tuple[bool, str, Optional[pd.DataFrame]]:
+        """处理伊起牛系统的奶牛产奶日汇总表（合并所有sheet）"""
+        try:
+            # 读取所有sheet
+            all_sheets_data = []
+            with pd.ExcelFile(file_path) as xls:
+                sheet_names = xls.sheet_names
+                logger.info(f"发现{len(sheet_names)}个sheet: {sheet_names}")
+                
+                for sheet_name in sheet_names:
+                    try:
+                        df = pd.read_excel(file_path, sheet_name=sheet_name)
+                        if len(df) > 0:
+                            df['source_sheet'] = sheet_name
+                            all_sheets_data.append(df)
+                            logger.info(f"Sheet {sheet_name}: {len(df)}条记录")
+                    except Exception as e:
+                        logger.warning(f"读取sheet {sheet_name}出错: {e}")
+                        continue
+            
+            if not all_sheets_data:
+                return False, "所有sheet都无法读取或为空", None
+            
+            # 合并所有sheet
+            combined_df = pd.concat(all_sheets_data, ignore_index=True)
+            logger.info(f"合并后总记录数: {len(combined_df)}")
+            
+            # 检查必要列
+            required_columns = ['耳号', '挤奶日期', '日产量(kg)']
+            missing_columns = [col for col in required_columns if col not in combined_df.columns]
+            
+            if missing_columns:
+                return False, f"缺少必要列: {missing_columns}", None
+            
+            # 标准化数据
+            result_df = pd.DataFrame()
+            result_df['ear_tag'] = combined_df['耳号'].astype(str).str.lstrip('0').replace('', '0')
+            result_df['milk_date'] = pd.to_datetime(combined_df['挤奶日期'], errors='coerce')
+            result_df['daily_yield'] = pd.to_numeric(combined_df['日产量(kg)'], errors='coerce')
+            
+            # 清理数据
+            result_df = result_df.dropna(subset=['ear_tag', 'milk_date', 'daily_yield'])
+            result_df = result_df[result_df['ear_tag'] != 'nan']
+            result_df = result_df[result_df['daily_yield'] > 0]
+            
+            logger.info(f"奶牛产奶日汇总表处理完成: {len(result_df)}条有效记录")
+            return True, f"成功处理{len(result_df)}条产奶记录", result_df
+            
+        except Exception as e:
+            logger.error(f"处理奶牛产奶日汇总表出错: {e}")
+            return False, str(e), None
+    
+    def _process_yiqiniu_disease(self, file_path: str) -> Tuple[bool, str, Optional[pd.DataFrame]]:
+        """处理伊起牛系统的发病查询导出表"""
+        try:
+            df = pd.read_excel(file_path)
+            logger.info(f"伊起牛发病查询导出表原始列名: {list(df.columns)}")
+            
+            # 检查必要列
+            required_columns = ['耳号', '发病日期', '疾病种类']
+            missing_columns = [col for col in required_columns if col not in df.columns]
+            
+            if missing_columns:
+                return False, f"缺少必要列: {missing_columns}", None
+            
+            # 标准化数据
+            result_df = pd.DataFrame()
+            result_df['ear_tag'] = df['耳号'].astype(str).str.lstrip('0').replace('', '0')
+            result_df['disease_date'] = pd.to_datetime(df['发病日期'], errors='coerce')
+            result_df['disease_type'] = df['疾病种类'].astype(str)
+            
+            # 筛选乳房炎相关疾病
+            mastitis_keywords = ['乳房疾病', '乳房炎', '乳房感染']
+            mastitis_condition = result_df['disease_type'].str.contains('|'.join(mastitis_keywords), na=False)
+            result_df = result_df[mastitis_condition]
+            
+            # 清理数据
+            result_df = result_df.dropna(subset=['ear_tag', 'disease_date'])
+            result_df = result_df[result_df['ear_tag'] != 'nan']
+            
+            logger.info(f"伊起牛发病查询导出表处理完成: {len(result_df)}条乳房炎记录")
+            return True, f"成功处理{len(result_df)}条乳房炎发病记录", result_df
+            
+        except Exception as e:
+            logger.error(f"处理伊起牛发病查询导出表出错: {e}")
+            return False, str(e), None
+    
+    def _process_huimuyun_cattle_info(self, file_path: str) -> Tuple[bool, str, Optional[pd.DataFrame]]:
+        """处理慧牧云系统的牛群数据管理表"""
+        try:
+            df = pd.read_excel(file_path)
+            logger.info(f"慧牧云牛群数据管理表原始列名: {list(df.columns)}")
+            
+            # 检查必要列
+            required_columns = ['耳号', '胎次', '泌乳天数', '繁育状态', '怀孕天数', '产犊日期']
+            # 慧牧云特有的列
+            if '最近七天奶厅平均奶量' in df.columns:
+                required_columns.append('最近七天奶厅平均奶量')
+            
+            missing_columns = [col for col in required_columns if col not in df.columns]
+            
+            if missing_columns:
+                return False, f"缺少必要列: {missing_columns}", None
+            
+            # 标准化数据
+            result_df = pd.DataFrame()
+            result_df['ear_tag'] = df['耳号'].astype(str).str.lstrip('0').replace('', '0')
+            result_df['parity'] = pd.to_numeric(df['胎次'], errors='coerce')
+            result_df['lactation_days'] = pd.to_numeric(df['泌乳天数'], errors='coerce')
+            result_df['breeding_status'] = df['繁育状态'].astype(str)
+            result_df['gestation_days'] = pd.to_numeric(df['怀孕天数'], errors='coerce')
+            result_df['last_calving_date'] = pd.to_datetime(df['产犊日期'], errors='coerce')
+            
+            # 慧牧云系统包含现成的最近七天平均奶量
+            if '最近七天奶厅平均奶量' in df.columns:
+                result_df['recent_7day_avg_yield'] = pd.to_numeric(df['最近七天奶厅平均奶量'], errors='coerce')
+            
+            # 清理数据
+            result_df = result_df.dropna(subset=['ear_tag'])
+            result_df = result_df[result_df['ear_tag'] != 'nan']
+            
+            logger.info(f"慧牧云牛群数据管理表处理完成: {len(result_df)}条记录")
+            return True, f"成功处理{len(result_df)}条牛群数据", result_df
+            
+        except Exception as e:
+            logger.error(f"处理慧牧云牛群数据管理表出错: {e}")
+            return False, str(e), None
+    
+    def _process_huimuyun_disease(self, file_path: str) -> Tuple[bool, str, Optional[pd.DataFrame]]:
+        """处理慧牧云系统的发病事件管理表"""
+        try:
+            df = pd.read_excel(file_path)
+            logger.info(f"慧牧云发病事件管理表原始列名: {list(df.columns)}")
+            
+            # 检查必要列
+            required_columns = ['耳号', '事件日期', '事件类型']
+            missing_columns = [col for col in required_columns if col not in df.columns]
+            
+            if missing_columns:
+                return False, f"缺少必要列: {missing_columns}", None
+            
+            # 标准化数据
+            result_df = pd.DataFrame()
+            result_df['ear_tag'] = df['耳号'].astype(str).str.lstrip('0').replace('', '0')
+            result_df['disease_date'] = pd.to_datetime(df['事件日期'], errors='coerce')
+            result_df['disease_type'] = df['事件类型'].astype(str)
+            
+            # 筛选乳房炎相关事件
+            mastitis_keywords = ['乳房炎', '乳房感染']
+            mastitis_condition = result_df['disease_type'].str.contains('|'.join(mastitis_keywords), na=False)
+            result_df = result_df[mastitis_condition]
+            
+            # 清理数据
+            result_df = result_df.dropna(subset=['ear_tag', 'disease_date'])
+            result_df = result_df[result_df['ear_tag'] != 'nan']
+            
+            logger.info(f"慧牧云发病事件管理表处理完成: {len(result_df)}条乳房炎记录")
+            return True, f"成功处理{len(result_df)}条乳房炎事件记录", result_df
+            
+        except Exception as e:
+            logger.error(f"处理慧牧云发病事件管理表出错: {e}")
+            return False, str(e), None
+    
+    def calculate_recent_7day_avg_yield(self, milk_data: pd.DataFrame) -> pd.DataFrame:
+        """计算每头牛最近七天奶厅平均奶量（仅用于伊起牛系统）
+        
+        Args:
+            milk_data: 奶牛产奶日汇总数据，包含columns: ['ear_tag', 'milk_date', 'daily_yield']
+            
+        Returns:
+            包含最近七天平均奶量的DataFrame，columns: ['ear_tag', 'recent_7day_avg_yield']
+        """
+        try:
+            if milk_data.empty:
+                return pd.DataFrame(columns=['ear_tag', 'recent_7day_avg_yield'])
+            
+            results = []
+            
+            # 按耳号分组处理
+            for ear_tag, group in milk_data.groupby('ear_tag'):
+                try:
+                    # 按日期排序
+                    group_sorted = group.sort_values('milk_date')
+                    
+                    # 找到最近的挤奶日期
+                    latest_date = group_sorted['milk_date'].max()
+                    
+                    # 计算7天前的日期
+                    seven_days_ago = latest_date - pd.Timedelta(days=6)  # 包含当天，所以是6天前
+                    
+                    # 筛选最近7天的数据
+                    recent_data = group_sorted[
+                        (group_sorted['milk_date'] >= seven_days_ago) & 
+                        (group_sorted['milk_date'] <= latest_date)
+                    ]
+                    
+                    if len(recent_data) > 0:
+                        # 计算平均值（忽略缺失的天数）
+                        avg_yield = recent_data['daily_yield'].mean()
+                        results.append({
+                            'ear_tag': ear_tag,
+                            'recent_7day_avg_yield': round(avg_yield, 2),
+                            'days_count': len(recent_data),
+                            'latest_date': latest_date
+                        })
+                        
+                        logger.debug(f"牛{ear_tag}: 最近{len(recent_data)}天平均奶量 {avg_yield:.2f}kg")
+                    
+                except Exception as e:
+                    logger.warning(f"计算牛{ear_tag}最近7天平均奶量时出错: {e}")
+                    continue
+            
+            result_df = pd.DataFrame(results)
+            logger.info(f"成功计算{len(result_df)}头牛的最近7天平均奶量")
+            
+            return result_df[['ear_tag', 'recent_7day_avg_yield']]
+            
+        except Exception as e:
+            logger.error(f"计算最近7天平均奶量时出错: {e}")
+            return pd.DataFrame(columns=['ear_tag', 'recent_7day_avg_yield'])
+    
+    def calculate_mastitis_count_per_lactation(self, cattle_info: pd.DataFrame, disease_data: pd.DataFrame) -> pd.DataFrame:
+        """计算每头牛本泌乳期的乳房炎发病次数
+        
+        Args:
+            cattle_info: 牛群基础信息，包含columns: ['ear_tag', 'last_calving_date']
+            disease_data: 发病数据，包含columns: ['ear_tag', 'disease_date', 'disease_type']
+            
+        Returns:
+            包含乳房炎发病统计的DataFrame，columns: ['ear_tag', 'mastitis_count', 'mastitis_dates']
+        """
+        try:
+            if cattle_info.empty or disease_data.empty:
+                return pd.DataFrame(columns=['ear_tag', 'mastitis_count', 'mastitis_dates'])
+            
+            results = []
+            
+            # 为每头牛计算乳房炎发病次数
+            for _, cow in cattle_info.iterrows():
+                ear_tag = cow['ear_tag']
+                calving_date = cow['last_calving_date']
+                
+                if pd.isna(calving_date):
+                    # 如果没有产犊日期，跳过
+                    results.append({
+                        'ear_tag': ear_tag,
+                        'mastitis_count': 0,
+                        'mastitis_dates': ''
+                    })
+                    continue
+                
+                # 找到该牛的所有发病记录
+                cow_diseases = disease_data[disease_data['ear_tag'] == ear_tag]
+                
+                if cow_diseases.empty:
+                    results.append({
+                        'ear_tag': ear_tag,
+                        'mastitis_count': 0,
+                        'mastitis_dates': ''
+                    })
+                    continue
+                
+                # 筛选本泌乳期（产犊日期之后）的乳房炎发病记录
+                lactation_diseases = cow_diseases[
+                    cow_diseases['disease_date'] >= calving_date
+                ]
+                
+                mastitis_dates = lactation_diseases['disease_date'].dt.strftime('%Y-%m-%d').tolist()
+                mastitis_count = len(mastitis_dates)
+                
+                results.append({
+                    'ear_tag': ear_tag,
+                    'mastitis_count': mastitis_count,
+                    'mastitis_dates': ','.join(mastitis_dates)
+                })
+                
+                if mastitis_count > 0:
+                    logger.debug(f"牛{ear_tag}: 本泌乳期乳房炎{mastitis_count}次，日期: {mastitis_dates}")
+            
+            result_df = pd.DataFrame(results)
+            total_cases = result_df['mastitis_count'].sum()
+            affected_cows = len(result_df[result_df['mastitis_count'] > 0])
+            
+            logger.info(f"乳房炎发病统计完成: {affected_cows}头牛发病，总计{total_cases}次")
+            
+            return result_df
+            
+        except Exception as e:
+            logger.error(f"计算乳房炎发病次数时出错: {e}")
+            return pd.DataFrame(columns=['ear_tag', 'mastitis_count', 'mastitis_dates'])
+    
+    def identify_chronic_mastitis_cows(self, dhi_data_list: List[Dict], selected_months: List[str], scc_threshold: float = 20.0, scc_operator: str = ">=") -> pd.DataFrame:
+        """识别慢性乳房炎感染牛
+        
+        Args:
+            dhi_data_list: DHI数据列表
+            selected_months: 选择的月份列表（格式：YYYY年MM月）
+            scc_threshold: 体细胞数阈值（万/ml）
+            scc_operator: 体细胞数比较操作符 ('<', '<=', '=', '>=', '>')
+            
+        Returns:
+            慢性感染牛DataFrame，columns: ['management_id', 'chronic_mastitis'] 或 ['ear_tag', 'chronic_mastitis']
+        """
+        try:
+            if not dhi_data_list:
+                return pd.DataFrame(columns=['management_id', 'chronic_mastitis'])
+            
+            if not selected_months:
+                logger.warning("没有选择检查月份")
+                return pd.DataFrame(columns=['management_id', 'chronic_mastitis'])
+            
+            # 合并所有DHI数据
+            all_dhi = []
+            for item in dhi_data_list:
+                df = item['data'].copy()
+                if 'somatic_cell_count' in df.columns:
+                    all_dhi.append(df)
+            
+            if not all_dhi:
+                logger.warning("没有找到包含体细胞数的DHI数据")
+                return pd.DataFrame(columns=['management_id', 'chronic_mastitis'])
+            
+            combined_dhi = pd.concat(all_dhi, ignore_index=True)
+            
+            # 确定使用的ID字段（优先使用management_id，如果没有则使用ear_tag）
+            if 'management_id' in combined_dhi.columns:
+                id_column = 'management_id'
+            elif 'ear_tag' in combined_dhi.columns:
+                id_column = 'ear_tag'
+            else:
+                logger.error("DHI数据中没有找到management_id或ear_tag字段")
+                return pd.DataFrame(columns=['management_id', 'chronic_mastitis'])
+            
+            # 检查必要字段（移除farm_id依赖）
+            required_fields = [id_column, 'sample_date', 'somatic_cell_count']
+            missing_fields = [field for field in required_fields if field not in combined_dhi.columns]
+            
+            if missing_fields:
+                logger.error(f"DHI数据缺少必要字段: {missing_fields}")
+                return pd.DataFrame(columns=[id_column, 'chronic_mastitis'])
+            
+            # 添加年月列（格式：YYYY年MM月）
+            combined_dhi['year_month'] = pd.to_datetime(combined_dhi['sample_date']).dt.strftime('%Y年%m月')
+            
+            # 转换选择的月份为集合以便快速查找
+            selected_months_set = set(selected_months)
+            
+            # 按牛分组检查指定月份的体细胞数
+            results = []
+            
+            for cow_id, group in combined_dhi.groupby(id_column):
+                try:
+                    # 按月份分组，计算每月平均体细胞数
+                    monthly_data = group.groupby('year_month')['somatic_cell_count'].mean()
+                    
+                    # 检查在所有选择的月份中，体细胞数是否都满足条件
+                    is_chronic = self._check_selected_months_scc(monthly_data, selected_months_set, scc_threshold, scc_operator)
+                    
+                    results.append({
+                        id_column: cow_id,
+                        'chronic_mastitis': is_chronic
+                    })
+                    
+                    if is_chronic:
+                        logger.debug(f"识别慢性感染牛: {id_column}={cow_id}")
+                        
+                except Exception as e:
+                    logger.warning(f"处理牛{cow_id}时出错: {e}")
+                    continue
+            
+            result_df = pd.DataFrame(results)
+            chronic_count = len(result_df[result_df['chronic_mastitis']])
+            total_count = len(result_df)
+            
+            logger.info(f"慢性乳房炎感染牛识别完成: {chronic_count}/{total_count}头牛被识别为慢性感染")
+            logger.info(f"检查条件: 在{', '.join(selected_months)}月份中体细胞数{scc_operator}{scc_threshold}万/ml")
+            
+            return result_df
+            
+        except Exception as e:
+            logger.error(f"识别慢性乳房炎感染牛时出错: {e}")
+            return pd.DataFrame(columns=['management_id', 'chronic_mastitis'])
+    
+    def _check_continuous_high_scc(self, monthly_scc: pd.Series, required_months: int, threshold: float) -> bool:
+        """检查是否有连续N个月体细胞数超过阈值"""
+        if len(monthly_scc) < required_months:
+            return False
+        
+        # 创建超过阈值的布尔序列
+        high_scc = monthly_scc > threshold
+        
+        # 检查是否有连续N个月为True
+        consecutive_count = 0
+        max_consecutive = 0
+        
+        for is_high in high_scc:
+            if is_high:
+                consecutive_count += 1
+                max_consecutive = max(max_consecutive, consecutive_count)
+            else:
+                consecutive_count = 0
+        
+        return max_consecutive >= required_months
+
+    def _check_selected_months_scc(self, monthly_scc: pd.Series, selected_months_set: set, threshold: float, operator: str = ">=") -> bool:
+        """检查在选定月份中体细胞数是否都满足条件
+        
+        Args:
+            monthly_scc: 按月份的体细胞数Series（索引为YYYY年MM月格式）
+            selected_months_set: 选择的月份集合
+            threshold: 体细胞数阈值
+            operator: 比较操作符
+            
+        Returns:
+            是否在所有选定月份都满足条件（必须所有月份都有数据且都满足条件）
+        """
+        try:
+            # 检查选择的月份中是否有数据
+            available_months = set(monthly_scc.index) & selected_months_set
+            
+            # 关键修改：必须所有选择的月份都有数据
+            if len(available_months) != len(selected_months_set):
+                missing_months = selected_months_set - available_months
+                logger.debug(f"缺失月份数据: {missing_months}，无法满足所有月份条件")
+                return False
+            
+            # 检查所有选择月份的体细胞数是否都满足条件
+            all_months_satisfy = True
+            for month in selected_months_set:
+                scc_value = monthly_scc[month]
+                
+                # 根据操作符进行比较
+                satisfies_condition = self._compare_value(scc_value, operator, threshold)
+                
+                if not satisfies_condition:
+                    all_months_satisfy = False
+                    logger.debug(f"月份{month}体细胞数{scc_value}不满足条件{operator}{threshold}")
+                    break
+                else:
+                    logger.debug(f"月份{month}体细胞数{scc_value}满足条件{operator}{threshold}")
+            
+            # 必须所有选择的月份都有数据且都满足条件
+            return all_months_satisfy
+            
+        except Exception as e:
+            logger.warning(f"检查体细胞数条件时出错: {e}")
+            return False
+    
+    def _compare_value(self, actual_value, operator: str, target_value) -> bool:
+        """根据操作符比较两个值
+        
+        Args:
+            actual_value: 实际值
+            operator: 操作符 ('<', '<=', '=', '>=', '>')
+            target_value: 目标值
+            
+        Returns:
+            比较结果
+        """
+        try:
+            if pd.isna(actual_value) or pd.isna(target_value):
+                return False
+            
+            actual_value = float(actual_value)
+            target_value = float(target_value)
+            
+            if operator == '<':
+                return actual_value < target_value
+            elif operator == '<=':
+                return actual_value <= target_value
+            elif operator == '=':
+                return abs(actual_value - target_value) < 0.001  # 浮点数相等比较
+            elif operator == '>=':
+                return actual_value >= target_value
+            elif operator == '>':
+                return actual_value > target_value
+            else:
+                logger.warning(f"未知的操作符: {operator}")
+                return False
+                
+        except (ValueError, TypeError) as e:
+            logger.warning(f"值比较时出错: {e}")
+            return False
+    
+    def apply_treatment_decisions(self, base_data: pd.DataFrame, treatment_config: Dict[str, Any]) -> pd.DataFrame:
+        """根据配置应用5种处置办法的判断逻辑
+        
+        Args:
+            base_data: 基础数据，包含所有必要字段
+            treatment_config: 处置办法配置
+            
+        Returns:
+            包含处置办法的DataFrame
+        """
+        try:
+            if base_data.empty:
+                return pd.DataFrame()
+            
+            result_df = base_data.copy()
+            
+            # 为每头牛判断符合的处置办法
+            treatment_results = []
+            
+            for _, cow in result_df.iterrows():
+                treatments = []
+                
+                # 前提条件：只有慢性感染牛才能进行处置办法判断
+                is_chronic = cow.get('chronic_mastitis', False)
+                
+                if not is_chronic:
+                    # 非慢性感染牛，不需要处置
+                    treatment_results.append('无')
+                    continue
+                
+                # 1. 淘汰
+                if self._check_cull_criteria(cow, treatment_config.get('cull', {})):
+                    treatments.append('淘汰')
+                
+                # 2. 禁配隔离
+                if self._check_isolate_criteria(cow, treatment_config.get('isolate', {})):
+                    treatments.append('禁配隔离')
+                
+                # 3. 瞎乳区
+                if self._check_blind_quarter_criteria(cow, treatment_config.get('blind_quarter', {})):
+                    treatments.append('瞎乳区')
+                
+                # 4. 提前干奶
+                if self._check_early_dry_criteria(cow, treatment_config.get('early_dry', {})):
+                    treatments.append('提前干奶')
+                
+                # 5. 治疗
+                if self._check_treatment_criteria(cow, treatment_config.get('treatment', {})):
+                    treatments.append('治疗')
+                
+                # 如果没有符合任何条件，且启用了默认治疗
+                if not treatments and treatment_config.get('default_treatment', True):
+                    treatments.append('治疗')
+                
+                treatment_results.append(','.join(treatments) if treatments else '无')
+            
+            result_df['treatment_methods'] = treatment_results
+            
+            # 统计结果
+            treatment_stats = {}
+            chronic_count = 0
+            for i, treatments in enumerate(treatment_results):
+                if result_df.iloc[i].get('chronic_mastitis', False):
+                    chronic_count += 1
+                for treatment in treatments.split(','):
+                    if treatment != '无':
+                        treatment_stats[treatment] = treatment_stats.get(treatment, 0) + 1
+            
+            logger.info(f"处置办法判断完成: {treatment_stats}")
+            logger.info(f"慢性感染牛总数: {chronic_count}")
+            
+            return result_df
+            
+        except Exception as e:
+            logger.error(f"应用处置办法判断时出错: {e}")
+            return base_data
+    
+    def _check_cull_criteria(self, cow: pd.Series, cull_config: Dict) -> bool:
+        """检查淘汰条件"""
+        if not cull_config.get('enabled', False):
+            return False
+        
+        try:
+            # 检查繁殖状态
+            breeding_statuses = cull_config.get('breeding_status', [])
+            if breeding_statuses and cow.get('breeding_status') not in breeding_statuses:
+                return False
+            
+            # 检查产奶量
+            if 'yield_operator' in cull_config and 'yield_value' in cull_config:
+                if not self._compare_value(
+                    cow.get('recent_7day_avg_yield'), 
+                    cull_config['yield_operator'], 
+                    cull_config['yield_value']
+                ):
+                    return False
+            
+            # 检查发病次数
+            if 'mastitis_operator' in cull_config and 'mastitis_value' in cull_config:
+                if not self._compare_value(
+                    cow.get('mastitis_count'), 
+                    cull_config['mastitis_operator'], 
+                    cull_config['mastitis_value']
+                ):
+                    return False
+            
+            # 检查泌乳天数
+            if 'lactation_operator' in cull_config and 'lactation_value' in cull_config:
+                if not self._compare_value(
+                    cow.get('lactation_days'), 
+                    cull_config['lactation_operator'], 
+                    cull_config['lactation_value']
+                ):
+                    return False
+            
+            return True
+            
+        except Exception as e:
+            logger.warning(f"检查淘汰条件时出错: {e}")
+            return False
+    
+    def _check_isolate_criteria(self, cow: pd.Series, isolate_config: Dict) -> bool:
+        """检查禁配隔离条件"""
+        if not isolate_config.get('enabled', False):
+            return False
+        
+        try:
+            # 检查繁殖状态
+            breeding_statuses = isolate_config.get('breeding_status', [])
+            if breeding_statuses and cow.get('breeding_status') not in breeding_statuses:
+                return False
+            
+            # 检查产奶量
+            if 'yield_operator' in isolate_config and 'yield_value' in isolate_config:
+                if not self._compare_value(
+                    cow.get('recent_7day_avg_yield'), 
+                    isolate_config['yield_operator'], 
+                    isolate_config['yield_value']
+                ):
+                    return False
+            
+            # 检查发病次数
+            if 'mastitis_operator' in isolate_config and 'mastitis_value' in isolate_config:
+                if not self._compare_value(
+                    cow.get('mastitis_count'), 
+                    isolate_config['mastitis_operator'], 
+                    isolate_config['mastitis_value']
+                ):
+                    return False
+            
+            # 检查泌乳天数
+            if 'lactation_operator' in isolate_config and 'lactation_value' in isolate_config:
+                if not self._compare_value(
+                    cow.get('lactation_days'), 
+                    isolate_config['lactation_operator'], 
+                    isolate_config['lactation_value']
+                ):
+                    return False
+            
+            return True
+            
+        except Exception as e:
+            logger.warning(f"检查禁配隔离条件时出错: {e}")
+            return False
+    
+    def _check_blind_quarter_criteria(self, cow: pd.Series, blind_config: Dict) -> bool:
+        """检查瞎乳区条件"""
+        if not blind_config.get('enabled', False):
+            return False
+        
+        try:
+            # 检查繁殖状态
+            breeding_statuses = blind_config.get('breeding_status', [])
+            if breeding_statuses and cow.get('breeding_status') not in breeding_statuses:
+                return False
+            
+            # 检查在胎天数
+            if 'gestation_operator' in blind_config and 'gestation_value' in blind_config:
+                if not self._compare_value(
+                    cow.get('gestation_days'), 
+                    blind_config['gestation_operator'], 
+                    blind_config['gestation_value']
+                ):
+                    return False
+            
+            # 检查发病次数
+            if 'mastitis_operator' in blind_config and 'mastitis_value' in blind_config:
+                if not self._compare_value(
+                    cow.get('mastitis_count'), 
+                    blind_config['mastitis_operator'], 
+                    blind_config['mastitis_value']
+                ):
+                    return False
+            
+            # 检查泌乳天数
+            if 'lactation_operator' in blind_config and 'lactation_value' in blind_config:
+                if not self._compare_value(
+                    cow.get('lactation_days'), 
+                    blind_config['lactation_operator'], 
+                    blind_config['lactation_value']
+                ):
+                    return False
+            
+            return True
+            
+        except Exception as e:
+            logger.warning(f"检查瞎乳区条件时出错: {e}")
+            return False
+    
+    def _check_early_dry_criteria(self, cow: pd.Series, early_dry_config: Dict) -> bool:
+        """检查提前干奶条件"""
+        if not early_dry_config.get('enabled', False):
+            return False
+        
+        try:
+            # 检查繁殖状态
+            breeding_statuses = early_dry_config.get('breeding_status', [])
+            if breeding_statuses and cow.get('breeding_status') not in breeding_statuses:
+                return False
+            
+            # 检查在胎天数
+            if 'gestation_operator' in early_dry_config and 'gestation_value' in early_dry_config:
+                if not self._compare_value(
+                    cow.get('gestation_days'), 
+                    early_dry_config['gestation_operator'], 
+                    early_dry_config['gestation_value']
+                ):
+                    return False
+            
+            # 检查发病次数
+            if 'mastitis_operator' in early_dry_config and 'mastitis_value' in early_dry_config:
+                if not self._compare_value(
+                    cow.get('mastitis_count'), 
+                    early_dry_config['mastitis_operator'], 
+                    early_dry_config['mastitis_value']
+                ):
+                    return False
+            
+            # 检查泌乳天数
+            if 'lactation_operator' in early_dry_config and 'lactation_value' in early_dry_config:
+                if not self._compare_value(
+                    cow.get('lactation_days'), 
+                    early_dry_config['lactation_operator'], 
+                    early_dry_config['lactation_value']
+                ):
+                    return False
+            
+            return True
+            
+        except Exception as e:
+            logger.warning(f"检查提前干奶条件时出错: {e}")
+            return False
+    
+    def _check_treatment_criteria(self, cow: pd.Series, treatment_config: Dict) -> bool:
+        """检查治疗条件"""
+        if not treatment_config.get('enabled', False):
+            return False
+        
+        try:
+            # 检查发病次数（治疗通常是发病次数较少的）
+            max_mastitis = treatment_config.get('max_mastitis_count', float('inf'))
+            if cow.get('mastitis_count', float('inf')) > max_mastitis:
+                return False
+            
+            # 其他治疗条件可以根据需要添加
+            
+            return True
+            
+        except Exception as e:
+            logger.warning(f"检查治疗条件时出错: {e}")
+            return False
+    
+    def create_mastitis_screening_report(self, screening_data: pd.DataFrame, selected_months: List[str] = None, dhi_data_list: List[Dict] = None) -> pd.DataFrame:
+        """创建慢性乳房炎筛查结果报告
+        
+        Args:
+            screening_data: 筛查数据
+            selected_months: 选择的月份列表（格式：YYYY年MM月）
+            dhi_data_list: DHI数据列表，用于提取体细胞数
+            
+        Returns:
+            格式化的结果报告DataFrame
+        """
+        try:
+            if screening_data.empty:
+                return pd.DataFrame()
+            
+            # 提取所选月份的体细胞数据
+            logger.info("开始提取所选月份的体细胞数据...")
+            scc_data = self._extract_monthly_scc_data(screening_data, selected_months, dhi_data_list)
+            
+            if scc_data is not None:
+                logger.info(f"✅ 体细胞数据提取成功，数据形状: {scc_data.shape}")
+                logger.info(f"体细胞数据列: {scc_data.columns.tolist()}")
+            else:
+                logger.warning("❌ 体细胞数据提取失败")
+            
+            # 选择和重新排序列
+            output_columns = [
+                'ear_tag', 'treatment_methods', 'parity', 'lactation_days', 
+                'recent_7day_avg_yield', 'breeding_status', 'gestation_days', 
+                'mastitis_count', 'mastitis_dates'
+            ]
+            
+            # 创建输出DataFrame
+            result_df = pd.DataFrame()
+            
+            for col in output_columns:
+                if col in screening_data.columns:
+                    result_df[col] = screening_data[col]
+                else:
+                    result_df[col] = None
+            
+            # 添加所选月份的体细胞数列
+            if scc_data is not None and not scc_data.empty:
+                # 确定合并的字段 - 更智能的匹配逻辑
+                merge_key = None
+                
+                # 打印调试信息
+                logger.info(f"result_df columns: {result_df.columns.tolist()}")
+                logger.info(f"scc_data columns: {scc_data.columns.tolist()}")
+                
+                if 'ear_tag' in result_df.columns and 'ear_tag' in scc_data.columns:
+                    merge_key = 'ear_tag'
+                elif 'management_id' in result_df.columns and 'management_id' in scc_data.columns:
+                    merge_key = 'management_id'
+                elif 'ear_tag' in result_df.columns and 'management_id' in scc_data.columns:
+                    # 筛查结果用ear_tag，体细胞数据用management_id
+                    # 假设ear_tag就是management_id
+                    scc_data_copy = scc_data.copy()
+                    scc_data_copy['ear_tag'] = scc_data_copy['management_id']
+                    merge_key = 'ear_tag'
+                    scc_data = scc_data_copy
+                    logger.info("创建ear_tag字段用于合并")
+                elif 'management_id' in result_df.columns and 'ear_tag' in scc_data.columns:
+                    # 筛查结果用management_id，体细胞数据用ear_tag
+                    scc_data_copy = scc_data.copy()
+                    scc_data_copy['management_id'] = scc_data_copy['ear_tag']
+                    merge_key = 'management_id'
+                    scc_data = scc_data_copy
+                    logger.info("创建management_id字段用于合并")
+                
+                if merge_key:
+                    # 合并体细胞数据
+                    logger.info(f"准备使用{merge_key}字段合并体细胞数据")
+                    result_df = result_df.merge(scc_data, left_on=merge_key, right_on=merge_key, how='left')
+                    logger.info(f"✅ 体细胞数据已使用{merge_key}字段成功合并，合并后列数: {len(result_df.columns)}")
+                else:
+                    logger.warning("❌ 无法找到合适的合并字段，跳过体细胞数据合并")
+                    logger.warning(f"筛查结果字段: {result_df.columns.tolist()}")
+                    logger.warning(f"体细胞数据字段: {scc_data.columns.tolist()}")
+            
+            # 重命名列为中文
+            column_mapping = {
+                'ear_tag': '耳号',
+                'treatment_methods': '处置办法',
+                'parity': '胎次',
+                'lactation_days': '泌乳天数',
+                'recent_7day_avg_yield': '最近七天奶厅平均奶量',
+                'breeding_status': '繁殖状态',
+                'gestation_days': '在胎天数',
+                'mastitis_count': '乳房炎发病次数',
+                'mastitis_dates': '每次乳房炎发病时间'
+            }
+            
+            # 添加体细胞数列的中文名称映射
+            if selected_months:
+                for month in selected_months:
+                    column_mapping[f'scc_{month}'] = f'{month}体细胞数(万/ml)'
+            
+            result_df = result_df.rename(columns=column_mapping)
+            
+            # 过滤掉没有处置办法的牛（如果需要）
+            result_df = result_df[result_df['处置办法'] != '无']
+            
+            logger.info(f"慢性乳房炎筛查报告生成完成: {len(result_df)}头牛需要处置")
+            
+            return result_df
+            
+        except Exception as e:
+            logger.error(f"创建慢性乳房炎筛查报告时出错: {e}")
+            return pd.DataFrame()
+
+    def export_mastitis_screening_results(self, result_df: pd.DataFrame, output_path: str) -> bool:
+        """导出慢性乳房炎筛查结果到Excel
+        
+        Args:
+            result_df: 结果DataFrame
+            output_path: 输出文件路径
+            
+        Returns:
+            是否成功导出
+        """
+        try:
+            if result_df.empty:
+                logger.warning("结果数据为空，无法导出")
+                return False
+            
+            # 创建Excel写入器
+            with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                # 写入主要结果
+                result_df.to_excel(writer, sheet_name='慢性乳房炎筛查结果', index=False)
+                
+                # 添加统计信息sheet
+                stats_data = self._create_mastitis_stats(result_df)
+                if not stats_data.empty:
+                    stats_data.to_excel(writer, sheet_name='统计信息', index=False)
+            
+            logger.info(f"慢性乳房炎筛查结果已导出到: {output_path}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"导出慢性乳房炎筛查结果时出错: {e}")
+            return False
+    
+    def _create_mastitis_stats(self, result_df: pd.DataFrame) -> pd.DataFrame:
+        """创建慢性乳房炎筛查统计信息"""
+        try:
+            stats = []
+            
+            # 总体统计
+            total_cows = len(result_df)
+            stats.append(['总计需要处置的牛只数', total_cows])
+            
+            # 按处置办法统计
+            if '处置办法' in result_df.columns:
+                treatment_counts = {}
+                for treatments in result_df['处置办法']:
+                    if pd.notna(treatments) and treatments != '无':
+                        for treatment in str(treatments).split(','):
+                            treatment = treatment.strip()
+                            treatment_counts[treatment] = treatment_counts.get(treatment, 0) + 1
+                
+                for treatment, count in treatment_counts.items():
+                    stats.append([f'{treatment}处置办法', count])
+            
+            # 按胎次统计
+            if '胎次' in result_df.columns:
+                parity_stats = result_df['胎次'].value_counts().sort_index()
+                for parity, count in parity_stats.items():
+                    if pd.notna(parity):
+                        stats.append([f'{int(parity)}胎牛只数', count])
+            
+            # 乳房炎发病次数统计
+            if '乳房炎发病次数' in result_df.columns:
+                mastitis_stats = result_df['乳房炎发病次数'].value_counts().sort_index()
+                for count, cow_num in mastitis_stats.items():
+                    if pd.notna(count):
+                        stats.append([f'发病{int(count)}次的牛只数', cow_num])
+            
+            stats_df = pd.DataFrame(stats, columns=['统计项目', '数量'])
+            return stats_df
+            
+        except Exception as e:
+            logger.error(f"创建统计信息时出错: {e}")
+            return pd.DataFrame()
+
+    # 删除临时分析文件
+    def cleanup_temp_files(self):
+        """清理临时文件"""
+        try:
+            temp_files = ['analyze_test_data.py']
+            for temp_file in temp_files:
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+                    logger.info(f"已删除临时文件: {temp_file}")
+        except Exception as e:
+            logger.warning(f"清理临时文件时出错: {e}")
+    
+    def _process_custom_cattle_info(self, file_path: str, field_mappings: Dict[str, str]) -> Tuple[bool, str, Optional[pd.DataFrame]]:
+        """处理自定义系统的牛群基础信息表"""
+        try:
+            df = pd.read_excel(file_path)
+            logger.info(f"自定义系统牛群基础信息表原始列名: {list(df.columns)}")
+            
+            # 检查字段映射是否完整
+            required_fields = ['耳号', '胎次', '泌乳天数', '繁育状态', '在胎天数', '最近产犊日期']
+            missing_mappings = []
+            for field in required_fields:
+                if field not in field_mappings or not field_mappings[field]:
+                    missing_mappings.append(field)
+            
+            if missing_mappings:
+                return False, f"缺少字段映射: {missing_mappings}", None
+            
+            # 检查表头列是否存在
+            missing_columns = []
+            for field, column_name in field_mappings.items():
+                if column_name not in df.columns:
+                    missing_columns.append(f"{field}({column_name})")
+            
+            if missing_columns:
+                return False, f"表格中缺少列: {missing_columns}", None
+            
+            # 标准化数据
+            result_df = pd.DataFrame()
+            result_df['ear_tag'] = df[field_mappings['耳号']].astype(str).str.lstrip('0').replace('', '0')
+            result_df['parity'] = pd.to_numeric(df[field_mappings['胎次']], errors='coerce')
+            result_df['lactation_days'] = pd.to_numeric(df[field_mappings['泌乳天数']], errors='coerce')
+            result_df['breeding_status'] = df[field_mappings['繁育状态']].astype(str)
+            result_df['gestation_days'] = pd.to_numeric(df[field_mappings['在胎天数']], errors='coerce')
+            result_df['last_calving_date'] = pd.to_datetime(df[field_mappings['最近产犊日期']], errors='coerce')
+            
+            # 如果有最近七天奶厅平均奶量字段，也处理它
+            if '最近七天奶厅平均奶量' in field_mappings and field_mappings['最近七天奶厅平均奶量']:
+                column_name = field_mappings['最近七天奶厅平均奶量']
+                if column_name in df.columns:
+                    result_df['recent_7day_avg_yield'] = pd.to_numeric(df[column_name], errors='coerce')
+            
+            # 清理数据
+            result_df = result_df.dropna(subset=['ear_tag'])
+            result_df = result_df[result_df['ear_tag'] != 'nan']
+            
+            logger.info(f"自定义系统牛群基础信息表处理完成: {len(result_df)}条记录")
+            return True, f"成功处理{len(result_df)}条牛群基础信息", result_df
+            
+        except Exception as e:
+            logger.error(f"处理自定义系统牛群基础信息表出错: {e}")
+            return False, str(e), None
+    
+    def _process_custom_disease(self, file_path: str, field_mappings: Dict[str, str]) -> Tuple[bool, str, Optional[pd.DataFrame]]:
+        """处理自定义系统的发病查询导出表"""
+        try:
+            df = pd.read_excel(file_path)
+            logger.info(f"自定义系统发病查询导出表原始列名: {list(df.columns)}")
+            
+            # 检查字段映射是否完整
+            required_fields = ['耳号', '发病日期', '疾病种类']
+            missing_mappings = []
+            for field in required_fields:
+                if field not in field_mappings or not field_mappings[field]:
+                    missing_mappings.append(field)
+            
+            if missing_mappings:
+                return False, f"缺少字段映射: {missing_mappings}", None
+            
+            # 检查表头列是否存在
+            missing_columns = []
+            for field, column_name in field_mappings.items():
+                if column_name not in df.columns:
+                    missing_columns.append(f"{field}({column_name})")
+            
+            if missing_columns:
+                return False, f"表格中缺少列: {missing_columns}", None
+            
+            # 标准化数据
+            result_df = pd.DataFrame()
+            result_df['ear_tag'] = df[field_mappings['耳号']].astype(str).str.lstrip('0').replace('', '0')
+            result_df['disease_date'] = pd.to_datetime(df[field_mappings['发病日期']], errors='coerce')
+            result_df['disease_type'] = df[field_mappings['疾病种类']].astype(str)
+            
+            # 筛选乳房炎相关疾病
+            mastitis_keywords = ['乳房炎', '乳房疾病', '乳房感染']
+            mastitis_condition = result_df['disease_type'].str.contains('|'.join(mastitis_keywords), na=False)
+            result_df = result_df[mastitis_condition]
+            
+            # 清理数据
+            result_df = result_df.dropna(subset=['ear_tag', 'disease_date'])
+            result_df = result_df[result_df['ear_tag'] != 'nan']
+            
+            logger.info(f"自定义系统发病查询导出表处理完成: {len(result_df)}条乳房炎记录")
+            return True, f"成功处理{len(result_df)}条乳房炎发病记录", result_df
+            
+        except Exception as e:
+            logger.error(f"处理自定义系统发病查询导出表出错: {e}")
+            return False, str(e), None
+
+    def _extract_monthly_scc_data(self, screening_data: pd.DataFrame, selected_months: List[str], dhi_data_list: List[Dict]) -> Optional[pd.DataFrame]:
+        """从DHI数据中提取所选月份的体细胞数
+        
+        Args:
+            screening_data: 筛查数据
+            selected_months: 选择的月份列表
+            dhi_data_list: DHI数据列表
+            
+        Returns:
+            包含体细胞数的DataFrame，列为ear_tag和各月份的体细胞数
+        """
+        try:
+            if not selected_months or not dhi_data_list or screening_data.empty:
+                logger.warning("体细胞数据提取失败：参数为空")
+                return None
+            
+            logger.info(f"开始提取体细胞数据，选择月份: {selected_months}")
+            logger.info(f"筛查数据列: {screening_data.columns.tolist()}")
+            logger.info(f"筛查数据行数: {len(screening_data)}")
+            
+            # 合并所有DHI数据
+            all_dhi = []
+            for item in dhi_data_list:
+                df = item['data'].copy()
+                if 'somatic_cell_count' in df.columns:
+                    all_dhi.append(df)
+            
+            if not all_dhi:
+                logger.warning("没有找到包含体细胞数的DHI数据")
+                return None
+            
+            combined_dhi = pd.concat(all_dhi, ignore_index=True)
+            
+            # 确定使用的ID字段
+            if 'management_id' in combined_dhi.columns:
+                dhi_id_column = 'management_id'
+            elif 'ear_tag' in combined_dhi.columns:
+                dhi_id_column = 'ear_tag'
+            else:
+                logger.warning("DHI数据中没有找到management_id或ear_tag字段")
+                return None
+            
+            # 检查必要字段（移除farm_id依赖）
+            required_fields = [dhi_id_column, 'sample_date', 'somatic_cell_count']
+            missing_fields = [field for field in required_fields if field not in combined_dhi.columns]
+            
+            if missing_fields:
+                logger.warning(f"DHI数据缺少必要字段: {missing_fields}")
+                return None
+            
+            # 添加年月列（格式：YYYY年MM月）
+            combined_dhi['year_month'] = pd.to_datetime(combined_dhi['sample_date']).dt.strftime('%Y年%m月')
+            
+            # 检查筛查数据中使用的ID字段，并与DHI数据匹配
+            if 'ear_tag' in screening_data.columns and 'ear_tag' in combined_dhi.columns:
+                # 两边都有ear_tag字段
+                id_column = 'ear_tag'
+                cow_ids = screening_data['ear_tag'].unique()
+            elif 'management_id' in screening_data.columns and 'management_id' in combined_dhi.columns:
+                # 两边都有management_id字段
+                id_column = 'management_id'
+                cow_ids = screening_data['management_id'].unique()
+            elif 'ear_tag' in screening_data.columns and 'management_id' in combined_dhi.columns:
+                # 筛查数据用ear_tag，DHI数据用management_id，尝试匹配
+                id_column = 'management_id'  # 使用DHI数据的字段
+                # 假设ear_tag就是management_id（乳房炎筛查中通常如此）
+                cow_ids = screening_data['ear_tag'].unique()
+                logger.info("筛查数据使用ear_tag，DHI数据使用management_id，将尝试直接匹配")
+            elif 'management_id' in screening_data.columns and 'ear_tag' in combined_dhi.columns:
+                # 筛查数据用management_id，DHI数据用ear_tag
+                id_column = 'ear_tag'  # 使用DHI数据的字段
+                cow_ids = screening_data['management_id'].unique()
+                logger.info("筛查数据使用management_id，DHI数据使用ear_tag，将尝试直接匹配")
+            else:
+                logger.error("无法在筛查数据和DHI数据之间找到匹配的ID字段")
+                return None
+            
+            # 初始化结果DataFrame
+            result_data = {id_column: cow_ids}
+            
+            # 为每个选择的月份提取体细胞数
+            for month in selected_months:
+                # 筛选该月份的数据
+                month_data = combined_dhi[combined_dhi['year_month'] == month]
+                
+                if month_data.empty:
+                    # 该月份没有数据，填充空值
+                    result_data[f'scc_{month}'] = [None] * len(cow_ids)
+                    logger.debug(f"月份{month}没有体细胞数据")
+                    continue
+                
+                # 按ID分组，计算该月的平均体细胞数
+                month_scc = month_data.groupby(id_column)['somatic_cell_count'].mean()
+                
+                # 为每个ID获取体细胞数
+                scc_values = []
+                valid_count = 0
+                for cow_id in cow_ids:
+                    if cow_id in month_scc.index:
+                        scc_values.append(round(month_scc[cow_id], 1))
+                        valid_count += 1
+                    else:
+                        scc_values.append(None)
+                
+                result_data[f'scc_{month}'] = scc_values
+                
+                logger.info(f"月份{month}体细胞数提取完成，有数据的牛只: {valid_count}/{len(cow_ids)}")
+            
+            result_df = pd.DataFrame(result_data)
+            
+            logger.info(f"✅ 体细胞数据提取完成: {len(selected_months)}个月份，{len(cow_ids)}头牛")
+            logger.info(f"返回的体细胞数据列: {result_df.columns.tolist()}")
+            logger.info(f"返回的体细胞数据行数: {len(result_df)}")
+            
+            return result_df
+            
+        except Exception as e:
+            logger.error(f"提取月度体细胞数据时出错: {e}")
+            return None

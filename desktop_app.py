@@ -388,7 +388,34 @@ class DisplaySettingsDialog(QDialog):
         """选择字体颜色"""
         color = QColorDialog.getColor(QColor(self.current_font_color), self, "选择字体颜色")
         if color.isValid():
-            self.current_font_color = color.name()
+            color_hex = color.name()
+            
+            # 防呆检查：检测亮度过高的颜色
+            try:
+                hex_color = color_hex.lstrip('#')
+                r = int(hex_color[0:2], 16)
+                g = int(hex_color[2:4], 16)
+                b = int(hex_color[4:6], 16)
+                brightness = (r * 0.299 + g * 0.587 + b * 0.114) / 255
+                
+                if brightness > 0.9:
+                    reply = QMessageBox.question(
+                        self,
+                        "字体颜色过浅提醒",
+                        f"⚠️ 您选择的颜色 {color_hex} 过于浅淡（亮度{brightness:.1%}）！\n\n"
+                        "在白色背景上可能看不清文字。\n\n"
+                        "建议选择深色字体以确保良好的可读性。\n\n"
+                        "是否仍要使用这个颜色？",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                        QMessageBox.StandardButton.No
+                    )
+                    
+                    if reply == QMessageBox.StandardButton.No:
+                        return  # 取消设置，保持原颜色
+            except:
+                pass  # 如果检查失败，继续使用用户选择的颜色
+            
+            self.current_font_color = color_hex
             self.update_color_button(self.font_color_btn, self.current_font_color)
             self.update_preview()
     
@@ -519,429 +546,11 @@ class DisplaySettingsDialog(QDialog):
         return scale, font_color, bg_color, font_family, font_size, font_bold, font_italic, font_underline
 
 
-class FarmIdUnificationDialog(QDialog):
-    """牧场编号统一选择对话框"""
+# FarmIdUnificationDialog class removed - no longer needed for single-farm uploads
     
-    def __init__(self, farm_id_files_map: Dict[str, List[str]], parent=None):
-        super().__init__(parent)
-        self.farm_id_files_map = farm_id_files_map
-        self.selected_farm_id = None
-        self.init_ui()
-    
-    def init_ui(self):
-        """初始化界面"""
-        self.setWindowTitle("牧场编号统一")
-        self.setModal(True)
-        self.resize(600, 400)
-        
-        layout = QVBoxLayout(self)
-        layout.setSpacing(15)
-        layout.setContentsMargins(20, 20, 20, 20)
-        
-        # 标题和说明
-        title_label = QLabel("发现多个不同的牧场编号")
-        title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #e74c3c; margin-bottom: 10px;")
-        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(title_label)
-        
-        desc_label = QLabel("系统检测到上传的文件包含不同的牧场编号。\n为确保数据一致性，请选择一个牧场编号统一所有数据：")
-        desc_label.setStyleSheet("font-size: 14px; color: #333; margin-bottom: 15px; line-height: 1.4;")
-        desc_label.setWordWrap(True)
-        layout.addWidget(desc_label)
-        
-        # 牧场编号选择区域
-        selection_frame = QFrame()
-        selection_frame.setFrameStyle(QFrame.Shape.StyledPanel)
-        selection_frame.setStyleSheet("""
-            QFrame {
-                border: 2px solid #3498db;
-                border-radius: 8px;
-                background-color: #f8f9fa;
-                padding: 15px;
-            }
-        """)
-        selection_layout = QVBoxLayout(selection_frame)
-        
-        # 单选按钮组
-        from PyQt6.QtWidgets import QButtonGroup, QRadioButton
-        self.button_group = QButtonGroup()
-        self.radio_buttons = {}
-        
-        for i, (farm_id, files) in enumerate(self.farm_id_files_map.items()):
-            # 创建单选按钮
-            radio_btn = QRadioButton()
-            radio_btn.setStyleSheet("""
-                QRadioButton {
-                    font-size: 14px;
-                    color: #333;
-                    spacing: 10px;
-                }
-                QRadioButton::indicator {
-                    width: 18px;
-                    height: 18px;
-                }
-                QRadioButton::indicator:unchecked {
-                    border: 2px solid #bdc3c7;
-                    border-radius: 9px;
-                    background-color: white;
-                }
-                QRadioButton::indicator:checked {
-                    border: 2px solid #3498db;
-                    border-radius: 9px;
-                    background-color: #3498db;
-                }
-            """)
-            
-            # 设置文本
-            files_count = len(files)
-            files_preview = "、".join(files[:3])
-            if files_count > 3:
-                files_preview += f"等{files_count}个文件"
-            else:
-                files_preview += f"共{files_count}个文件"
-            
-            radio_text = f"牧场编号：{farm_id}  ({files_preview})"
-            radio_btn.setText(radio_text)
-            
-            # 默认选择第一个
-            if i == 0:
-                radio_btn.setChecked(True)
-                self.selected_farm_id = farm_id
-            
-            # 连接信号
-            radio_btn.toggled.connect(lambda checked, fid=farm_id: self.on_farm_id_selected(checked, fid))
-            
-            self.button_group.addButton(radio_btn, i)
-            self.radio_buttons[farm_id] = radio_btn
-            selection_layout.addWidget(radio_btn)
-            
-            # 添加文件详情（可折叠）
-            if files_count > 3:
-                details_label = QLabel(f"   完整文件列表：{', '.join(files)}")
-                details_label.setStyleSheet("font-size: 12px; color: #666; margin-left: 30px; margin-bottom: 10px;")
-                details_label.setWordWrap(True)
-                selection_layout.addWidget(details_label)
-        
-        layout.addWidget(selection_frame)
-        
-        # 警告信息
-        warning_frame = QFrame()
-        warning_frame.setStyleSheet("""
-            QFrame {
-                background-color: #fff3cd;
-                border: 1px solid #ffeaa7;
-                border-radius: 6px;
-                padding: 12px;
-                margin: 10px 0;
-            }
-        """)
-        warning_layout = QHBoxLayout(warning_frame)
-        
-        warning_icon = QLabel("⚠️")
-        warning_icon.setStyleSheet("font-size: 18px;")
-        warning_layout.addWidget(warning_icon)
-        
-        warning_text = QLabel("注意：选择统一牧场编号后，所有文件中的牧场编号都将被更新为所选编号。此操作不可撤销。")
-        warning_text.setStyleSheet("font-size: 13px; color: #856404; font-weight: bold;")
-        warning_text.setWordWrap(True)
-        warning_layout.addWidget(warning_text)
-        
-        layout.addWidget(warning_frame)
-        
-        # 按钮区域
-        button_layout = QHBoxLayout()
-        
-        # 取消按钮
-        cancel_btn = QPushButton("❌ 取消上传")
-        cancel_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #e74c3c;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 10px 20px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #c0392b;
-            }
-            QPushButton:pressed {
-                background-color: #a93226;
-            }
-        """)
-        cancel_btn.clicked.connect(self.reject)
-        button_layout.addWidget(cancel_btn)
-        
-        button_layout.addStretch()
-        
-        # 确定按钮
-        confirm_btn = QPushButton("✅ 确认统一")
-        confirm_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 10px 20px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #229954;
-            }
-            QPushButton:pressed {
-                background-color: #1e8449;
-            }
-        """)
-        confirm_btn.clicked.connect(self.accept)
-        button_layout.addWidget(confirm_btn)
-        
-        layout.addLayout(button_layout)
-    
-    def on_farm_id_selected(self, checked: bool, farm_id: str):
-        """当选择牧场编号时"""
-        if checked:
-            self.selected_farm_id = farm_id
-    
-    def get_selected_farm_id(self) -> str:
-        """获取选择的牧场编号"""
-        return self.selected_farm_id or ""
 
 
-class BatchFarmIdInputDialog(QDialog):
-    """批量管理号输入对话框"""
-    
-    def __init__(self, missing_files, parent=None):
-        super().__init__(parent)
-        self.missing_files = missing_files  # 缺少管理号的文件列表
-        self.farm_id_inputs = {}  # 存储输入框
-        self.setWindowTitle("批量输入牛场编号")
-        self.setModal(True)
-        self.init_ui()
-    
-    def init_ui(self):
-        """初始化界面"""
-        layout = QVBoxLayout(self)
-        
-        # 标题说明
-        title_label = QLabel("以下文件缺少牛场编号，请为每个文件输入对应的牛场编号：")
-        title_label.setFont(QFont("Microsoft YaHei", 12, QFont.Weight.Bold))
-        title_label.setStyleSheet("color: #d32f2f; padding: 10px; background-color: #ffebee; border-radius: 5px;")
-        layout.addWidget(title_label)
-        
-        # 创建滚动区域以支持大量文件
-        scroll_area = QScrollArea()
-        scroll_widget = QWidget()
-        scroll_layout = QVBoxLayout(scroll_widget)
-        
-        # 为每个缺少管理号的文件创建输入行
-        for file_info in self.missing_files:
-            filename = file_info.get('filename', 'Unknown')
-            source_info = file_info.get('source_info', '')
-            
-            # 创建文件信息组
-            file_group = QGroupBox(f"文件: {filename}")
-            file_group.setStyleSheet("""
-                QGroupBox {
-                    font-weight: bold;
-                    border: 2px solid #cccccc;
-                    border-radius: 5px;
-                    margin-top: 10px;
-                    padding-top: 10px;
-                }
-                QGroupBox::title {
-                    subcontrol-origin: margin;
-                    left: 10px;
-                    padding: 0 5px 0 5px;
-                }
-            """)
-            
-            file_layout = QVBoxLayout(file_group)
-            
-            # 显示来源信息
-            if source_info:
-                source_label = QLabel(f"来源: {source_info}")
-                source_label.setStyleSheet("color: #666666; font-size: 10px; margin-bottom: 5px;")
-                file_layout.addWidget(source_label)
-            
-            # 输入框布局
-            input_layout = QHBoxLayout()
-            
-            # 牛场编号标签
-            label = QLabel("牛场编号:")
-            label.setMinimumWidth(80)
-            label.setStyleSheet("font-weight: bold; color: #333333;")
-            input_layout.addWidget(label)
-            
-            # 输入框
-            farm_id_input = QLineEdit()
-            farm_id_input.setPlaceholderText("请输入牛场编号（如：123456）")
-            farm_id_input.setStyleSheet("""
-                QLineEdit {
-                    padding: 8px;
-                    border: 2px solid #ddd;
-                    border-radius: 4px;
-                    font-size: 12px;
-                }
-                QLineEdit:focus {
-                    border-color: #007bff;
-                }
-                QLineEdit:hover {
-                    border-color: #0056b3;
-                }
-            """)
-            input_layout.addWidget(farm_id_input)
-            
-            # 保存输入框引用
-            self.farm_id_inputs[filename] = farm_id_input
-            
-            file_layout.addLayout(input_layout)
-            scroll_layout.addWidget(file_group)
-        
-        # 设置滚动区域
-        scroll_area.setWidget(scroll_widget)
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setMaximumHeight(400)  # 限制最大高度
-        layout.addWidget(scroll_area)
-        
-        # 操作说明
-        hint_label = QLabel("💡 提示：同一批次的所有数据将使用相同的牛场编号")
-        hint_label.setStyleSheet("color: #666666; font-style: italic; padding: 5px;")
-        layout.addWidget(hint_label)
-        
-        # 按钮组
-        button_layout = QHBoxLayout()
-        
-        # 全部设置为相同值按钮
-        set_all_btn = QPushButton("全部设为相同编号")
-        set_all_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #17a2b8;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #138496;
-            }
-            QPushButton:pressed {
-                background-color: #117a8b;
-            }
-        """)
-        set_all_btn.clicked.connect(self.set_all_same)
-        button_layout.addWidget(set_all_btn)
-        
-        button_layout.addStretch()
-        
-        # 确定按钮
-        ok_btn = QPushButton("确定")
-        ok_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #28a745;
-                color: white;
-                border: none;
-                padding: 8px 20px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #218838;
-            }
-            QPushButton:pressed {
-                background-color: #1e7e34;
-            }
-        """)
-        ok_btn.clicked.connect(self.accept)
-        button_layout.addWidget(ok_btn)
-        
-        # 取消按钮
-        cancel_btn = QPushButton("取消")
-        cancel_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #6c757d;
-                color: white;
-                border: none;
-                padding: 8px 20px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #5a6268;
-            }
-            QPushButton:pressed {
-                background-color: #545b62;
-            }
-        """)
-        cancel_btn.clicked.connect(self.reject)
-        button_layout.addWidget(cancel_btn)
-        
-        layout.addLayout(button_layout)
-        
-        # 设置对话框大小
-        self.resize(600, min(150 + len(self.missing_files) * 120, 600))
-    
-    def set_all_same(self):
-        """设置所有文件为相同的牛场编号"""
-        farm_id, ok = QInputDialog.getText(
-            self, 
-            "设置牛场编号", 
-            "请输入要应用到所有文件的牛场编号:",
-            text=""
-        )
-        
-        if ok and farm_id.strip():
-            farm_id = farm_id.strip()
-            # 将相同的值应用到所有输入框
-            for input_widget in self.farm_id_inputs.values():
-                input_widget.setText(farm_id)
-    
-    def accept(self):
-        """确认输入"""
-        # 验证所有输入
-        missing_inputs = []
-        for filename, input_widget in self.farm_id_inputs.items():
-            farm_id = input_widget.text().strip()
-            if not farm_id:
-                missing_inputs.append(filename)
-        
-        if missing_inputs:
-            QMessageBox.warning(
-                self, 
-                "输入不完整", 
-                f"以下文件的牛场编号不能为空:\n" + "\n".join(missing_inputs)
-            )
-            return
-        
-        # 验证牛场编号格式（可选）
-        invalid_inputs = []
-        for filename, input_widget in self.farm_id_inputs.items():
-            farm_id = input_widget.text().strip()
-            if not farm_id.isdigit() or len(farm_id) < 3:
-                invalid_inputs.append(f"{filename}: {farm_id}")
-        
-        if invalid_inputs:
-            reply = QMessageBox.question(
-                self,
-                "格式验证",
-                f"以下牛场编号格式可能不正确（建议使用3位以上纯数字）:\n" + 
-                "\n".join(invalid_inputs) + 
-                "\n\n是否继续？",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
-            if reply != QMessageBox.StandardButton.Yes:
-                return
-        
-        super().accept()
-    
-    def get_farm_ids(self):
-        """获取所有输入的牛场编号"""
-        result = {}
-        for filename, input_widget in self.farm_id_inputs.items():
-            result[filename] = input_widget.text().strip()
-        return result
+# BatchFarmIdInputDialog class removed - no longer needed for single-farm uploads
 
 
 class FileProcessThread(QThread):
@@ -1082,7 +691,7 @@ class FileProcessThread(QThread):
             # 发送错误信号给所有文件
             for filename in self.filenames:
                 self.file_processed.emit(filename, False, error_msg, {})
-    
+
     def _get_source_info(self, filename):
         """获取文件来源信息"""
         # 检查是否来自压缩包
@@ -1134,7 +743,7 @@ class FilterThread(QThread):
             # 统计启用的筛选项
             enabled_filters = []
             for filter_name, filter_config in self.filters.items():
-                if filter_config.get('enabled', False) and filter_name not in ['farm_id', 'parity', 'date_range']:
+                if filter_config.get('enabled', False) and filter_name not in ['parity', 'date_range']:
                     enabled_filters.append(filter_name)
             
             self.log_updated.emit(f"📋 启用的筛选项: {enabled_filters if enabled_filters else '仅基础筛选'}")
@@ -1145,10 +754,10 @@ class FilterThread(QThread):
             all_cows = set()
             for item in self.data_list:
                 df = item['data']
-                if 'farm_id' in df.columns and 'management_id' in df.columns:
-                    cow_pairs = df[['farm_id', 'management_id']].dropna()
-                    for _, row in cow_pairs.iterrows():
-                        all_cows.add((row['farm_id'], row['management_id']))
+                if 'management_id' in df.columns:
+                    cow_ids = df['management_id'].dropna().unique()
+                    for cow_id in cow_ids:
+                        all_cows.add(cow_id)
             
             self.log_updated.emit(f"📊 全部数据: {len(all_cows)} 头牛")
             
@@ -1157,10 +766,10 @@ class FilterThread(QThread):
             selected_data = [item for item in self.data_list if item['filename'] in self.selected_files]
             for item in selected_data:
                 df = item['data']
-                if 'farm_id' in df.columns and 'management_id' in df.columns:
-                    cow_pairs = df[['farm_id', 'management_id']].dropna()
-                    for _, row in cow_pairs.iterrows():
-                        range_cows.add((row['farm_id'], row['management_id']))
+                if 'management_id' in df.columns:
+                    cow_ids = df['management_id'].dropna().unique()
+                    for cow_id in cow_ids:
+                        range_cows.add(cow_id)
             
             self.log_updated.emit(f"📊 筛选范围: {len(range_cows)} 头牛 (来自{len(self.selected_files)}个文件)")
             
@@ -1191,7 +800,7 @@ class FilterThread(QThread):
             self.progress_updated.emit("生成月度报告...", 50)
             
             # 动态构建display_fields，包含所有启用的筛选项
-            display_fields = ['farm_id', 'management_id', 'parity']
+            display_fields = ['management_id', 'parity']
             
             # 添加启用的筛选项到display_fields
             # 定义所有支持的字段
@@ -1265,10 +874,10 @@ class FilterThread(QThread):
             
             # 计算筛选结果的牛头数
             result_cows = set()
-            if not monthly_report.empty and 'farm_id' in monthly_report.columns and 'management_id' in monthly_report.columns:
-                cow_pairs = monthly_report[['farm_id', 'management_id']].dropna()
-                for _, row in cow_pairs.iterrows():
-                    result_cows.add((row['farm_id'], row['management_id']))
+            if not monthly_report.empty and 'management_id' in monthly_report.columns:
+                cow_ids = monthly_report['management_id'].dropna().unique()
+                for cow_id in cow_ids:
+                    result_cows.add(cow_id)
             
             # 计算筛选率
             filter_rate = (len(result_cows) / len(all_cows) * 100) if len(all_cows) > 0 else 0
@@ -1319,7 +928,11 @@ class MainWindow(QMainWindow):
         # 加载显示设置
         self.settings = QSettings("DHI", "ProteinScreening")
         self.display_scale = self.settings.value("display_scale", 100, type=int)
-        self.font_color = self.settings.value("font_color", "#000000", type=str)
+        
+        # 防呆设计：检查字体颜色是否过浅，自动修正
+        raw_font_color = self.settings.value("font_color", "#000000", type=str)
+        self.font_color = self.validate_and_fix_font_color(raw_font_color)
+        
         self.background_color = self.settings.value("background_color", "#ffffff", type=str)
         self.font_family = self.settings.value("font_family", "Microsoft YaHei", type=str)
         self.font_size = self.settings.value("font_size", 12, type=int)
@@ -1332,6 +945,39 @@ class MainWindow(QMainWindow):
         
         self.init_ui()
         self.load_config()
+        
+        # 启动时检查是否有显示问题（防呆功能）
+        QTimer.singleShot(1000, self.check_display_issues_on_startup)
+    
+    def validate_and_fix_font_color(self, color_str: str) -> str:
+        """防呆设计：验证并修正字体颜色，防止设置过浅的颜色导致文字不可见"""
+        try:
+            # 移除#号
+            hex_color = color_str.lstrip('#')
+            if len(hex_color) != 6:
+                return "#000000"  # 无效格式，返回黑色
+            
+            # 转换为RGB
+            r = int(hex_color[0:2], 16)
+            g = int(hex_color[2:4], 16) 
+            b = int(hex_color[4:6], 16)
+            
+            # 计算亮度（使用相对亮度公式）
+            brightness = (r * 0.299 + g * 0.587 + b * 0.114) / 255
+            
+            # 如果亮度过高（> 0.9），强制使用黑色
+            if brightness > 0.9:
+                print(f"⚠️ 防呆提醒：检测到过浅的字体颜色 {color_str}（亮度{brightness:.1%}），已自动修正为黑色")
+                # 同时更新设置中的值，避免下次启动再次触发
+                self.settings.setValue("font_color", "#000000")
+                return "#000000"
+                
+            # 颜色合适，返回原值
+            return color_str
+            
+        except Exception as e:
+            print(f"⚠️ 字体颜色验证出错 {color_str}: {e}，使用默认黑色")
+            return "#000000"
     
     def get_safe_screen_info(self):
         """安全地获取屏幕信息 - 更准确的DPI适配"""
@@ -1495,23 +1141,26 @@ class MainWindow(QMainWindow):
             
             /* 输入控件 */
             QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QDateEdit {{
-                color: {font_color};
-                background-color: {background_color};
+                color: black;
+                background-color: white;
                 border: 1px solid {border_color};
                 padding: 6px;
                 border-radius: 4px;
+                font-weight: bold;
             }}
             
             QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, 
             QComboBox:focus, QDateEdit:focus {{
                 border: 2px solid {accent_color};
+                color: black;
             }}
             
             /* 文本显示控件 */
             QLabel {{
-                color: {font_color};
-                background-color: transparent;
+                color: black;
+                background-color: white;
                 text-decoration: {text_decoration};
+                font-weight: bold;
             }}
             
             /* 按钮 */
@@ -1538,9 +1187,10 @@ class MainWindow(QMainWindow):
             
             /* 复选框和单选按钮 */
             QCheckBox, QRadioButton {{
-                color: {font_color};
-                background-color: transparent;
+                color: black;
+                background-color: white;
                 spacing: 6px;
+                font-weight: bold;
             }}
             
             QCheckBox::indicator, QRadioButton::indicator {{
@@ -1889,6 +1539,12 @@ class MainWindow(QMainWindow):
         display_action.triggered.connect(self.show_display_settings)
         settings_menu.addAction(display_action)
         
+        # 恢复默认显示（防呆功能）
+        reset_display_action = QAction("🔧 恢复默认显示", self)
+        reset_display_action.setStatusTip("一键恢复默认字体颜色和显示设置（解决文字看不见问题）")
+        reset_display_action.triggered.connect(self.reset_display_settings_to_default)
+        settings_menu.addAction(reset_display_action)
+        
         settings_menu.addSeparator()
         
         # 关于
@@ -1950,6 +1606,177 @@ class MainWindow(QMainWindow):
         
         QApplication.quit()
         subprocess.Popen([sys.executable] + sys.argv)
+    
+    def create_styled_message_box(self, icon_type, title, text, buttons=None, default_button=None):
+        """创建带有统一样式的消息框"""
+        msg = QMessageBox(self)
+        msg.setIcon(icon_type)
+        msg.setWindowTitle(title)
+        msg.setText(text)
+        
+        # 设置统一的样式 - 确保文字清晰可见
+        msg.setStyleSheet("""
+            QMessageBox {
+                background-color: white;
+                color: black;
+                font-family: 'Microsoft YaHei', 'SimHei', sans-serif;
+                font-size: 12px;
+                border: 1px solid #ddd;
+                border-radius: 8px;
+            }
+            QMessageBox QLabel {
+                color: black;
+                background-color: white;
+                font-weight: bold;
+                padding: 10px;
+                font-size: 13px;
+            }
+            QMessageBox QPushButton {
+                background-color: #007bff;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 12px;
+                min-width: 60px;
+            }
+            QMessageBox QPushButton:hover {
+                background-color: #0056b3;
+            }
+            QMessageBox QPushButton:pressed {
+                background-color: #004085;
+            }
+            QMessageBox QPushButton:default {
+                background-color: #28a745;
+            }
+            QMessageBox QPushButton:default:hover {
+                background-color: #1e7e34;
+            }
+        """)
+        
+        if buttons:
+            msg.setStandardButtons(buttons)
+        if default_button:
+            msg.setDefaultButton(default_button)
+            
+        return msg
+    
+    def show_info(self, title, text):
+        """显示信息提示框"""
+        msg = self.create_styled_message_box(QMessageBox.Icon.Information, title, text)
+        return msg.exec()
+    
+    def show_warning(self, title, text):
+        """显示警告提示框"""
+        msg = self.create_styled_message_box(QMessageBox.Icon.Warning, title, text)
+        return msg.exec()
+    
+    def show_error(self, title, text):
+        """显示错误提示框"""
+        msg = self.create_styled_message_box(QMessageBox.Icon.Critical, title, text)
+        return msg.exec()
+    
+    def show_question(self, title, text, buttons=None, default_button=None):
+        """显示问题对话框"""
+        if buttons is None:
+            buttons = QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        if default_button is None:
+            default_button = QMessageBox.StandardButton.No
+            
+        msg = self.create_styled_message_box(QMessageBox.Icon.Question, title, text, buttons, default_button)
+        return msg.exec()
+    
+    def reset_display_settings_to_default(self):
+        """防呆功能：恢复默认显示设置"""
+        reply = QMessageBox.question(
+            self, 
+            "恢复默认显示设置", 
+            "🔧 这将恢复所有显示设置为默认值：\n\n"
+            "• 字体颜色：黑色\n"
+            "• 背景颜色：白色\n" 
+            "• 字体类型：Microsoft YaHei\n"
+            "• 字体大小：12px\n"
+            "• 显示比例：100%\n"
+            "• 其他字体样式：取消加粗/斜体/下划线\n"
+            "• 跟随系统主题：启用\n\n"
+            "💡 这可以解决文字看不见或显示异常的问题。\n\n"
+            "是否确认恢复默认设置？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            # 恢复所有默认值
+            self.settings.setValue("display_scale", 100)
+            self.settings.setValue("font_color", "#000000")
+            self.settings.setValue("background_color", "#ffffff")
+            self.settings.setValue("font_family", "Microsoft YaHei")
+            self.settings.setValue("font_size", 12)
+            self.settings.setValue("font_bold", False)
+            self.settings.setValue("font_italic", False)
+            self.settings.setValue("font_underline", False)
+            self.settings.setValue("use_system_theme", True)
+            
+            # 立即应用新设置
+            self.display_scale = 100
+            self.font_color = "#000000"
+            self.background_color = "#ffffff" 
+            self.font_family = "Microsoft YaHei"
+            self.font_size = 12
+            self.font_bold = False
+            self.font_italic = False
+            self.font_underline = False
+            
+            # 重新应用样式
+            self.apply_consistent_styling()
+            QTimer.singleShot(100, self.force_uniform_font_on_all_widgets)
+            
+            # 显示成功消息
+            QMessageBox.information(
+                self,
+                "设置已恢复",
+                "✅ 显示设置已成功恢复为默认值！\n\n"
+                "🎯 所有文字现在应该清晰可见。\n"
+                "💡 如果仍有显示问题，建议重启程序获得最佳效果。",
+                QMessageBox.StandardButton.Ok
+            )
+            
+            print("✅ 用户手动恢复了默认显示设置")
+    
+    def check_display_issues_on_startup(self):
+        """启动时检查显示问题（防呆功能）"""
+        try:
+            # 检查字体颜色是否过浅
+            hex_color = self.font_color.lstrip('#')
+            if len(hex_color) == 6:
+                r = int(hex_color[0:2], 16)
+                g = int(hex_color[2:4], 16)
+                b = int(hex_color[4:6], 16)
+                brightness = (r * 0.299 + g * 0.587 + b * 0.114) / 255
+                
+                # 如果亮度过高且背景也是白色，提示用户
+                if brightness > 0.85 and self.background_color.lower() in ['#ffffff', '#fff', 'white']:
+                    reply = QMessageBox.question(
+                        self,
+                        "显示问题提醒",
+                        f"🔍 检测到可能的显示问题：\n\n"
+                        f"当前字体颜色：{self.font_color} （亮度{brightness:.1%}）\n"
+                        f"当前背景颜色：{self.background_color}\n\n"
+                        f"⚠️ 浅色字体在白色背景上可能看不清楚，\n"
+                        f"如果您遇到文字显示问题，建议恢复默认设置。\n\n"
+                        f"💡 您可以通过菜单\"设置 → 恢复默认显示\"来解决。\n\n"
+                        f"是否现在恢复默认显示设置？",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                        QMessageBox.StandardButton.No
+                    )
+                    
+                    if reply == QMessageBox.StandardButton.Yes:
+                        self.reset_display_settings_to_default()
+                        
+        except Exception as e:
+            # 静默失败，不影响程序启动
+            print(f"显示问题检查失败: {e}")
     
     def setup_status_bar(self):
         """设置状态栏"""
@@ -2452,6 +2279,8 @@ class MainWindow(QMainWindow):
         self.create_basic_data_tab()
         self.create_dhi_filter_tab()
         self.create_mastitis_screening_tab()
+        
+        # 隐形乳房炎月度监测标签页
         self.create_mastitis_monitoring_tab()
         
         layout.addWidget(self.function_tabs)
@@ -2572,104 +2401,47 @@ class MainWindow(QMainWindow):
         tab_layout.addWidget(active_cattle_group)
         
         # 3. 基础筛选条件区域
-        basic_filter_group = self.create_card_widget("🔍 基础筛选条件")
+        basic_filter_group = self.create_card_widget("🔧 基础筛选条件")
         basic_filter_layout = QFormLayout(getattr(basic_filter_group, 'content_widget'))
         basic_filter_layout.setContentsMargins(card_margin, card_margin, card_margin, card_margin)
         
-        # 确保表单有足够的行间距和字段间距
-        form_spacing = self.get_dpi_scaled_size(15)  # 增加行间距
-        basic_filter_layout.setVerticalSpacing(form_spacing)
-        basic_filter_layout.setHorizontalSpacing(self.get_dpi_scaled_size(10))
-        
-        # 设置表单字段的增长策略，确保标签和控件都有足够空间
-        basic_filter_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
-        basic_filter_layout.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        basic_filter_layout.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
-        
-        # 牛场编号选择
-        self.farm_combo = QComboBox()
-        self.farm_combo.setEditable(True)
-        self.farm_combo.setStyleSheet(form_styles)
-        basic_filter_layout.addRow("🏭 牛场编号:", self.farm_combo)
-        
-        # 胎次范围
+        # 胎次范围筛选
         parity_layout = QHBoxLayout()
         self.parity_min = QSpinBox()
         self.parity_min.setRange(1, 99)
         self.parity_min.setValue(1)
         self.parity_min.setStyleSheet(form_styles)
+        
         self.parity_max = QSpinBox()
         self.parity_max.setRange(1, 99)
-        self.parity_max.setValue(8)
+        self.parity_max.setValue(99)
         self.parity_max.setStyleSheet(form_styles)
-        parity_layout.addWidget(self.parity_min)
-        dash_label = QLabel("—")
-        dash_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        dash_margin = self.get_dpi_scaled_size(8)
-        dash_label.setStyleSheet(f"color: #6c757d; margin: 0 {dash_margin}px;")
-        parity_layout.addWidget(dash_label)
-        parity_layout.addWidget(self.parity_max)
-        basic_filter_layout.addRow("🐄 胎次范围:", parity_layout)
         
-        # 日期范围
+        parity_layout.addWidget(QLabel("从"))
+        parity_layout.addWidget(self.parity_min)
+        parity_layout.addWidget(QLabel("到"))
+        parity_layout.addWidget(self.parity_max)
+        parity_layout.addWidget(QLabel("胎"))
+        parity_layout.addStretch()
+        basic_filter_layout.addRow("胎次范围:", parity_layout)
+        
+        # 日期范围筛选
         date_layout = QHBoxLayout()
         self.date_start = QDateEdit()
-        self.date_start.setDate(QDate(2024, 1, 1))
         self.date_start.setCalendarPopup(True)
-        
-        # 日期控件样式
-        date_input_padding = self.get_dpi_scaled_size(8)
-        date_border_radius = self.get_dpi_scaled_size(4)
-        date_styles = f"""
-            QDateEdit {{
-                border: 2px solid #ced4da;
-                border-radius: {date_border_radius}px;
-                padding: {date_input_padding}px;
-                background-color: white;
-                color: #495057;
-                selection-background-color: #007bff;
-                selection-color: white;
-            }}
-            QDateEdit:focus {{
-                border-color: #80bdff;
-                outline: none;
-            }}
-            QDateEdit:hover {{
-                border-color: #adb5bd;
-            }}
-            QDateEdit::drop-down {{
-                subcontrol-origin: padding;
-                subcontrol-position: top right;
-                width: 20px;
-                border-left: 1px solid #ced4da;
-                background-color: #f8f9fa;
-                border-top-right-radius: {date_border_radius}px;
-                border-bottom-right-radius: {date_border_radius}px;
-            }}
-            QDateEdit::drop-down:hover {{
-                background-color: #e9ecef;
-            }}
-        """
-        self.date_start.setStyleSheet(date_styles)
+        self.date_start.setDate(QDate.currentDate().addMonths(-12))  # 默认一年前
+        self.date_start.setStyleSheet(form_styles)
         
         self.date_end = QDateEdit()
-        self.date_end.setDate(QDate(2025, 12, 31))
         self.date_end.setCalendarPopup(True)
-        self.date_end.setStyleSheet(date_styles)
-        date_layout.addWidget(self.date_start)
-        dash_label3 = QLabel("—")
-        dash_label3.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        dash_label3.setStyleSheet(f"color: #6c757d; margin: 0 {dash_margin}px;")
-        date_layout.addWidget(dash_label3)
-        date_layout.addWidget(self.date_end)
-        basic_filter_layout.addRow("📅 采样日期:", date_layout)
+        self.date_end.setDate(QDate.currentDate())  # 默认今天
+        self.date_end.setStyleSheet(form_styles)
         
-        # 计划调群日期
-        self.plan_date = QDateEdit()
-        self.plan_date.setDate(QDate.currentDate().addDays(30))
-        self.plan_date.setCalendarPopup(True)
-        self.plan_date.setStyleSheet(date_styles)
-        basic_filter_layout.addRow("📆 计划调群日:", self.plan_date)
+        date_layout.addWidget(self.date_start)
+        date_layout.addWidget(QLabel("至"))
+        date_layout.addWidget(self.date_end)
+        date_layout.addStretch()
+        basic_filter_layout.addRow("日期范围:", date_layout)
         
         tab_layout.addWidget(basic_filter_group)
         
@@ -2895,12 +2667,33 @@ class MainWindow(QMainWindow):
         future_range_widget.setLayout(future_range_layout)
         future_days_layout.addWidget(future_range_widget)
         
+        # 计划调群日期选择器
+        plan_date_widget = QWidget()
+        plan_date_layout = QHBoxLayout()
+        plan_date_layout.setContentsMargins(0, 0, 0, 0)
+        
+        plan_date_label = QLabel("计划调群日期:")
+        plan_date_label.setStyleSheet("font-weight: bold;")
+        plan_date_layout.addWidget(plan_date_label)
+        
+        self.plan_date = QDateEdit()
+        self.plan_date.setCalendarPopup(True)
+        self.plan_date.setDate(QDate.currentDate().addDays(30))  # 默认30天后
+        self.plan_date.setStyleSheet(form_styles)
+        plan_date_layout.addWidget(self.plan_date)
+        
+        plan_date_layout.addStretch()
+        plan_date_widget.setLayout(plan_date_layout)
+        future_days_layout.addWidget(plan_date_widget)
+        
         # 控制范围设置的启用状态
         def toggle_future_days_range():
             enabled = self.future_days_enabled.isChecked()
             self.future_days_min.setEnabled(enabled)
             self.future_days_max.setEnabled(enabled)
+            self.plan_date.setEnabled(enabled)
             dash_label4.setEnabled(enabled)
+            plan_date_label.setEnabled(enabled)
         
         self.future_days_enabled.toggled.connect(toggle_future_days_range)
         toggle_future_days_range()
@@ -2969,7 +2762,7 @@ class MainWindow(QMainWindow):
         action_layout.addWidget(self.filter_progress)
         
         self.filter_label = QLabel("")
-        self.filter_label.setStyleSheet(f"color: #6c757d;")
+        self.filter_label.setStyleSheet(f"color: #495057; font-weight: 500;")
         action_layout.addWidget(self.filter_label)
         
         tab_layout.addWidget(action_group)
@@ -2978,7 +2771,7 @@ class MainWindow(QMainWindow):
         tab_layout.addStretch()
         
         self.function_tabs.addTab(tab_widget, "🔬 DHI基础筛选")
-    
+
     def load_filter_config(self, filter_key):
         """从配置文件加载筛选项目配置"""
         try:
@@ -3007,6 +2800,27 @@ class MainWindow(QMainWindow):
                 'min_match_months': 3,
                 'treat_empty_as_match': False
             }
+    
+    def on_system_type_changed(self, system_type: str):
+        """系统类型改变时的处理函数"""
+        try:
+            print(f"系统类型已切换到: {system_type}")
+            
+            # 这里可以根据系统类型执行相应的逻辑
+            # 例如：更新界面显示、重置某些设置等
+            
+            # 更新状态栏消息
+            self.safe_show_status_message(f"已切换到{system_type}系统")
+            
+            # 如果需要，可以在这里添加更多的系统类型切换逻辑
+            # 比如：
+            # - 更新默认的筛选条件
+            # - 重置某些界面元素
+            # - 加载系统特定的配置
+            
+        except Exception as e:
+            print(f"系统类型切换处理出错: {e}")
+            # 不抛出异常，避免影响程序运行
 
     def create_mastitis_screening_tab(self):
         """创建牧场慢性乳房炎感染牛筛查处置标签页"""
@@ -3031,8 +2845,11 @@ class MainWindow(QMainWindow):
         system_radio_layout.setContentsMargins(0, 0, 0, 0)
         
         self.yiqiniu_radio = QCheckBox("伊起牛系统")
+        self.yiqiniu_radio.setStyleSheet("color: black; background-color: white; font-weight: bold;")
         self.huimuyun_radio = QCheckBox("慧牧云系统")
+        self.huimuyun_radio.setStyleSheet("color: black; background-color: white; font-weight: bold;")
         self.custom_radio = QCheckBox("其他系统")
+        self.custom_radio.setStyleSheet("color: black; background-color: white; font-weight: bold;")
         
         # 设置为单选模式
         self.yiqiniu_radio.toggled.connect(lambda checked: self.on_mastitis_system_selected('yiqiniu', checked))
@@ -3075,10 +2892,12 @@ class MainWindow(QMainWindow):
         
         # 默认显示提示信息
         no_data_label = QLabel("请先上传DHI数据以选择月份")
-        no_data_label.setStyleSheet("color: #6c757d; font-style: italic;")
+        no_data_label.setStyleSheet("color: #495057; font-style: italic; font-weight: 500;")
         chronic_months_layout.addWidget(no_data_label, 0, 0, 1, 3)
         
-        chronic_layout.addRow("选择检查月份:", self.chronic_months_widget)
+        chronic_months_label = QLabel("选择检查月份:")
+        chronic_months_label.setStyleSheet("color: black; background-color: white; font-weight: bold;")
+        chronic_layout.addRow(chronic_months_label, self.chronic_months_widget)
         
         # 体细胞数阈值设置
         scc_threshold_layout = QHBoxLayout()
@@ -3101,7 +2920,9 @@ class MainWindow(QMainWindow):
         
         scc_threshold_widget = QWidget()
         scc_threshold_widget.setLayout(scc_threshold_layout)
-        chronic_layout.addRow("体细胞数:", scc_threshold_widget)
+        scc_label = QLabel("体细胞数:")
+        scc_label.setStyleSheet("color: black; background-color: white; font-weight: bold;")
+        chronic_layout.addRow(scc_label, scc_threshold_widget)
         
         # 存储阈值比较符号
         self.scc_threshold_combo = scc_threshold_combo
@@ -3183,7 +3004,7 @@ class MainWindow(QMainWindow):
         
         # 进度状态标签
         self.progress_status_label = QLabel("")
-        self.progress_status_label.setStyleSheet("font-size: 12px; color: #666; margin-top: 2px;")
+        self.progress_status_label.setStyleSheet("font-size: 12px; color: #495057; margin-top: 2px; font-weight: 500;")
         self.progress_status_label.setVisible(False)
         self.progress_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         progress_layout.addWidget(self.progress_status_label)
@@ -3191,7 +3012,7 @@ class MainWindow(QMainWindow):
         action_layout.addWidget(progress_widget)
         
         self.mastitis_status_label = QLabel("请选择数据管理系统并上传相关文件")
-        self.mastitis_status_label.setStyleSheet("color: #6c757d; font-size: 14px; padding: 10px;")
+        self.mastitis_status_label.setStyleSheet("color: #495057; font-size: 14px; padding: 10px; font-weight: 500;")
         action_layout.addWidget(self.mastitis_status_label)
         
         tab_layout.addWidget(action_group)
@@ -3206,17 +3027,193 @@ class MainWindow(QMainWindow):
         self.function_tabs.addTab(tab_widget, "🏥 慢性乳房炎筛查")
 
     def create_mastitis_monitoring_tab(self):
-        """创建隐形乳房炎月度监测标签页 - 简化版本"""
+        """创建隐形乳房炎月度监测标签页"""
+        try:
+            import pyqtgraph as pg
+        except ImportError:
+            # 如果PyQtGraph未安装，显示错误信息
+            tab_widget = QWidget()
+            tab_layout = QVBoxLayout(tab_widget)
+            error_label = QLabel("缺少PyQtGraph依赖，请安装: pip install pyqtgraph")
+            error_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            error_label.setStyleSheet("color: #dc3545; padding: 20px;")
+            tab_layout.addWidget(error_label)
+            tab_layout.addStretch()
+            self.function_tabs.addTab(tab_widget, "👁️ 隐形乳房炎监测")
+            return
+
         tab_widget = QWidget()
         tab_layout = QVBoxLayout(tab_widget)
+        tab_layout.setSpacing(10)
+        tab_layout.setContentsMargins(15, 15, 15, 15)
         
-        placeholder_label = QLabel("隐形乳房炎监测功能正在开发中...")
-        placeholder_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        placeholder_label.setStyleSheet("color: #6c757d; padding: 20px;")
-        tab_layout.addWidget(placeholder_label)
+        # 创建标题
+        title_label = QLabel("隐形乳房炎月度监测")
+        title_label.setStyleSheet("""
+            QLabel {
+                font-size: 18px;
+                font-weight: bold;
+                color: black;
+                background-color: white;
+                padding: 10px 0px;
+                border-bottom: 2px solid #3498db;
+                margin-bottom: 15px;
+            }
+        """)
+        tab_layout.addWidget(title_label)
         
+        # 1. 顶部配置区域（简化为一行）
+        config_card = self.create_card_widget("🛠️ 监测配置")
+        config_layout = QHBoxLayout()
+        config_layout.setSpacing(15)
+        
+        # 体细胞阈值设置
+        threshold_label = QLabel("体细胞阈值:")
+        threshold_label.setStyleSheet("font-weight: bold; color: black; background-color: white;")
+        
+        self.monitoring_scc_threshold = QDoubleSpinBox()
+        self.monitoring_scc_threshold.setRange(1.0, 100.0)
+        self.monitoring_scc_threshold.setValue(20.0)
+        self.monitoring_scc_threshold.setSuffix(" 万/ml")
+        self.monitoring_scc_threshold.setMaximumWidth(150)
+        self.monitoring_scc_threshold.setStyleSheet("""
+            QDoubleSpinBox {
+                border: 2px solid #ddd;
+                border-radius: 5px;
+                padding: 5px;
+                font-size: 12px;
+                color: black;
+                background-color: white;
+                font-weight: bold;
+            }
+            QDoubleSpinBox:focus {
+                border-color: #3498db;
+                color: black;
+            }
+        """)
+        
+        # 按钮组
+        button_styles = self.get_responsive_button_styles()
+        
+        self.start_monitoring_btn = QPushButton("🔍 开始分析")
+        self.start_monitoring_btn.setStyleSheet(button_styles['primary'])
+        self.start_monitoring_btn.clicked.connect(self.start_mastitis_monitoring)
+        self.start_monitoring_btn.setMaximumWidth(120)
+        
+        self.export_monitoring_btn = QPushButton("📤 导出Excel")
+        self.export_monitoring_btn.setStyleSheet(button_styles['success'])
+        self.export_monitoring_btn.clicked.connect(self.export_monitoring_results)
+        self.export_monitoring_btn.setEnabled(False)
+        self.export_monitoring_btn.setMaximumWidth(120)
+        
+        # 状态显示
+        self.monitoring_status_label = QLabel("请先在慢性乳房炎筛查中上传牛群基础信息，然后上传DHI数据")
+        self.monitoring_status_label.setStyleSheet("""
+            QLabel {
+                color: black;
+                font-size: 12px;
+                padding: 8px 12px;
+                background-color: #f8f9fa;
+                border-radius: 4px;
+                border-left: 4px solid #ffc107;
+                font-weight: bold;
+            }
+        """)
+        
+        # 添加到配置布局
+        config_layout.addWidget(threshold_label)
+        config_layout.addWidget(self.monitoring_scc_threshold)
+        config_layout.addWidget(self.start_monitoring_btn)
+        config_layout.addWidget(self.export_monitoring_btn)
+        config_layout.addStretch()
+        
+        config_card.layout().addLayout(config_layout)
+        config_card.layout().addWidget(self.monitoring_status_label)
+        tab_layout.addWidget(config_card)
+        
+        # 添加弹性空间
         tab_layout.addStretch()
+        
+        # 初始化监测计算器
+        self.mastitis_monitoring_calculator = None
+        self.mastitis_monitoring_results = None
+        
         self.function_tabs.addTab(tab_widget, "👁️ 隐形乳房炎监测")
+    
+    def get_mastitis_monitoring_formula_html(self):
+        """获取隐形乳房炎监测公式说明HTML"""
+        return """
+        <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+            <h3 style="color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 5px;">📊 隐形乳房炎月度监测指标计算公式</h3>
+            
+            <h4 style="color: #e67e22;">1. 当月流行率 (%)</h4>
+            <p><strong>公式:</strong> 体细胞数(万/ml) > 阈值的牛头数 ÷ 当月参测牛头数 × 100</p>
+            <p><strong>数据来源:</strong> DHI报告 - 体细胞计数字段</p>
+            
+            <h4 style="color: #e67e22;">2. 新发感染率 (%)</h4>
+            <p><strong>公式:</strong> (当月SCC>阈值 且 上月SCC≤阈值的牛头数) ÷ (上月SCC≤阈值的牛头数) × 100</p>
+            <p><strong>数据来源:</strong> 连续两个月DHI报告对比</p>
+            <p><strong>注意:</strong> 需要至少2个月的数据，基于管理号匹配重叠牛只</p>
+            
+            <h4 style="color: #e67e22;">3. 慢性感染率 (%)</h4>
+            <p><strong>公式:</strong> (当月SCC>阈值 且 上月SCC>阈值的牛头数) ÷ (上月SCC>阈值的牛头数) × 100</p>
+            <p><strong>数据来源:</strong> 连续两个月DHI报告对比</p>
+            
+            <h4 style="color: #e67e22;">4. 慢性感染牛占比 (%)</h4>
+            <p><strong>公式:</strong> (当月SCC>阈值 且 上月SCC>阈值的牛头数) ÷ (当月参测牛头数) × 100</p>
+            <p><strong>数据来源:</strong> 连续两个月DHI报告对比</p>
+            
+            <h4 style="color: #e67e22;">5. 头胎/经产首测流行率 (%)</h4>
+            <p><strong>公式:</strong> (胎次=1/胎次>1 且 DIM5-35天 且 SCC>阈值的牛头数) ÷ (相应胎次且DIM5-35天的参测牛头数) × 100</p>
+            <p><strong>数据来源:</strong> DHI报告 - 胎次、泌乳天数、体细胞计数字段</p>
+            
+            <h4 style="color: #e67e22;">6. 干奶前流行率 (%)</h4>
+            <p><strong>公式:</strong> (在胎天数>180天 且 SCC>阈值的牛头数) ÷ (在胎天数>180天的参测牛头数) × 100</p>
+            <p><strong>数据来源:</strong> DHI报告 + 牛群基础信息 (管理号与耳号匹配)</p>
+            <p><strong>数据要求:</strong></p>
+            <ul>
+                <li>必须先在"慢性乳房炎筛查"中上传牛群基础信息</li>
+                <li>牛群基础信息需包含耳号和在胎天数字段</li>
+                <li>DHI数据的管理号需要能与牛群基础信息的耳号匹配</li>
+                <li>系统会自动去除前导0进行匹配</li>
+            </ul>
+            <p><strong>常见问题:</strong></p>
+            <ul>
+                <li>如果显示"数据无法匹配"，通常是DHI数据与牛群信息来自不同时间点</li>
+                <li>如果显示"无在胎天数数据"，说明匹配的牛只当时处于空怀状态</li>
+                <li>如果显示"无符合条件牛只"，说明当前没有在胎天数>180天的牛</li>
+            </ul>
+            <p><strong>数据要求:</strong></p>
+            <ul>
+                <li>必须先在"慢性乳房炎筛查"中上传牛群基础信息</li>
+                <li>牛群基础信息需包含耳号和在胎天数字段</li>
+                <li>DHI数据的管理号需要能与牛群基础信息的耳号匹配</li>
+                <li>系统会自动去除前导0进行匹配</li>
+            </ul>
+            <p><strong>常见问题:</strong></p>
+            <ul>
+                <li>如果显示"数据无法匹配"，通常是DHI数据与牛群信息来自不同时间点</li>
+                <li>如果显示"无在胎天数数据"，说明匹配的牛只当时处于空怀状态</li>
+                <li>如果显示"无符合条件牛只"，说明当前没有在胎天数>180天的牛</li>
+            </ul>
+            
+            <h4 style="color: #27ae60;">⚠️ 重要说明</h4>
+            <ul>
+                <li><strong>体细胞阈值:</strong> 默认20万/ml，可在界面上方调整</li>
+                <li><strong>数据匹配:</strong> 基于管理号标准化匹配，自动去除前导0</li>
+                <li><strong>月份连续性:</strong> 系统会检查并提示月份缺失情况</li>
+                <li><strong>统计意义:</strong> 重叠牛只<20头时会显示统计警告</li>
+                <li><strong>计算透明度:</strong> 表格中显示每个指标的详细计算过程</li>
+            </ul>
+        </div>
+        """
+    
+    def toggle_widget_visibility(self, widget):
+        """切换控件显示/隐藏状态"""
+        if widget.isVisible():
+            widget.hide()
+        else:
+            widget.show()
     
     def create_result_panel(self):
         """创建右侧结果面板"""
@@ -3338,13 +3335,295 @@ class MainWindow(QMainWindow):
                 color: #495057;
             }}
         """)
-        self.tab_widget.addTab(self.result_table, "📊 筛选结果")
+        # 创建筛选结果的次级标签页结构
+        self.result_widget = self.create_result_sub_tabs()
+        self.tab_widget.addTab(self.result_widget, "📊 筛选结果")
         
         # 筛选分析标签页（合并统计信息）
         self.analysis_widget = self.create_analysis_panel()
         self.tab_widget.addTab(self.analysis_widget, "🎯 筛选分析")
         
         return panel
+    
+    def create_result_sub_tabs(self):
+        """创建筛选结果的次级标签页"""
+        result_widget = QWidget()
+        layout = QVBoxLayout(result_widget)
+        layout.setContentsMargins(5, 5, 5, 5)
+        
+        # 创建次级标签页容器
+        self.result_sub_tabs = QTabWidget()
+        self.result_sub_tabs.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid #c0c0c0;
+                border-radius: 4px;
+                background-color: white;
+            }
+            QTabBar::tab {
+                background-color: #f0f0f0;
+                border: 1px solid #c0c0c0;
+                padding: 8px 12px;
+                margin-right: 2px;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+                font-size: 12px;
+            }
+            QTabBar::tab:selected {
+                background-color: white;
+                border-bottom-color: white;
+                font-weight: bold;
+            }
+            QTabBar::tab:hover {
+                background-color: #e9ecef;
+            }
+        """)
+        
+        # 次级标签页1: DHI基础筛选结果 (保留原有的结果表格)
+        self.result_table = QTableWidget()
+        self.result_table.setStyleSheet("""
+            QTableWidget {
+                border: none;
+                background-color: white;
+                alternate-background-color: #f8f9fa;
+                gridline-color: #dee2e6;
+                selection-background-color: #007bff;
+                selection-color: white;
+            }
+            QTableWidget::item {
+                padding: 8px;
+                border-bottom: 1px solid #dee2e6;
+            }
+            QTableWidget::item:selected {
+                background-color: #007bff;
+                color: white;
+            }
+            QHeaderView::section {
+                background-color: #f8f9fa;
+                padding: 10px;
+                border: none;
+                border-bottom: 2px solid #e0e0e0;
+                font-weight: bold;
+                color: #495057;
+            }
+        """)
+        self.result_sub_tabs.addTab(self.result_table, "📊 DHI基础筛选")
+        
+        # 次级标签页2: 慢性乳房炎筛查结果
+        self.create_mastitis_screening_result_tab()
+        
+        # 次级标签页3: 隐形乳房炎监测
+        self.create_mastitis_monitoring_result_tab()
+        
+        layout.addWidget(self.result_sub_tabs)
+        return result_widget
+    
+    def create_mastitis_screening_result_tab(self):
+        """创建慢性乳房炎筛查结果标签页"""
+        tab_widget = QWidget()
+        tab_layout = QVBoxLayout(tab_widget)
+        tab_layout.setSpacing(0)
+        tab_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # 直接创建表格，不添加任何其他组件
+        self.mastitis_screening_table = QTableWidget()
+        self.mastitis_screening_table.setStyleSheet("""
+            QTableWidget {
+                border: 1px solid #ddd;
+                background-color: white;
+                gridline-color: #e0e0e0;
+            }
+            QTableWidget::item {
+                padding: 8px;
+                border-bottom: 1px solid #e0e0e0;
+            }
+            QTableWidget::item:selected {
+                background-color: #ffeaa7;
+                color: #2d3436;
+            }
+            QHeaderView::section {
+                background-color: #f5f5f5;
+                padding: 10px;
+                border: 1px solid #ddd;
+                font-weight: bold;
+            }
+        """)
+        
+        # 添加空状态提示
+        self.mastitis_screening_table.setRowCount(1)
+        self.mastitis_screening_table.setColumnCount(1)
+        self.mastitis_screening_table.setHorizontalHeaderLabels(["状态"])
+        
+        empty_item = QTableWidgetItem("暂无筛查结果，请在左侧'慢性乳房炎筛查'功能中进行筛查")
+        empty_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.mastitis_screening_table.setItem(0, 0, empty_item)
+        
+        # 直接添加表格到布局，不使用卡片容器
+        tab_layout.addWidget(self.mastitis_screening_table)
+        
+        self.result_sub_tabs.addTab(tab_widget, "🏥 慢性乳房炎筛查")
+    
+    def create_mastitis_monitoring_result_tab(self):
+        """创建隐形乳房炎监测结果标签页"""
+        # 检查PyQtGraph依赖
+        try:
+            import pyqtgraph as pg
+        except ImportError:
+            tab_widget = QWidget()
+            tab_layout = QVBoxLayout(tab_widget)
+            error_label = QLabel("缺少PyQtGraph依赖，请安装: pip install pyqtgraph")
+            error_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            error_label.setStyleSheet("color: #dc3545; padding: 20px;")
+            tab_layout.addWidget(error_label)
+            tab_layout.addStretch()
+            self.result_sub_tabs.addTab(tab_widget, "👁️ 隐形乳房炎监测")
+            return
+
+        tab_widget = QWidget()
+        tab_layout = QVBoxLayout(tab_widget)
+        tab_layout.setSpacing(5)
+        tab_layout.setContentsMargins(5, 5, 5, 5)
+        
+        # 添加说明信息
+        info_label = QLabel("💡 请在左侧【隐形乳房炎月度监测】标签页中进行配置和分析，结果将在此处显示")
+        info_label.setStyleSheet("""
+            QLabel {
+                color: black;
+                font-size: 12px;
+                padding: 8px 12px;
+                background-color: #f8f9fa;
+                border-radius: 4px;
+                border-left: 4px solid #17a2b8;
+                margin-bottom: 10px;
+                font-weight: bold;
+            }
+        """)
+        tab_layout.addWidget(info_label)
+        
+        # 创建主要内容区域 - 水平分割：左侧表格、右侧图表和公式说明
+        main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        main_splitter.setSizes([600, 400])  # 左侧表格600，右侧400
+        
+        # 左侧：监测结果表格
+        table_widget = QWidget()
+        table_layout = QVBoxLayout(table_widget)
+        table_layout.setContentsMargins(0, 0, 5, 0)
+        
+        table_title = QLabel("📊 监测结果")
+        table_title.setStyleSheet("font-weight: bold; font-size: 14px; color: black; background-color: white; margin-bottom: 8px;")
+        table_layout.addWidget(table_title)
+        
+        self.mastitis_monitoring_table = QTableWidget()
+        self.mastitis_monitoring_table.setStyleSheet("""
+            QTableWidget {
+                border: 1px solid #ddd;
+                background-color: white;
+                gridline-color: #e0e0e0;
+                alternate-background-color: #f8f9fa;
+                color: black;
+            }
+            QTableWidget::item {
+                padding: 6px;
+                border-bottom: 1px solid #e0e0e0;
+                color: black;
+                background-color: white;
+                font-weight: bold;
+            }
+            QTableWidget::item:selected {
+                background-color: #e3f2fd;
+                color: black;
+            }
+            QHeaderView::section {
+                background-color: #f5f5f5;
+                padding: 8px;
+                border: 1px solid #ddd;
+                font-weight: bold;
+                font-size: 11px;
+                color: black;
+            }
+        """)
+        table_layout.addWidget(self.mastitis_monitoring_table)
+        
+        # 右侧：图表和公式说明的垂直分割
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(3, 0, 0, 0)
+        right_layout.setSpacing(5)
+        
+        # 上部：趋势图表
+        self.mastitis_monitoring_plot = pg.PlotWidget()
+        self.mastitis_monitoring_plot.setLabel('left', '百分比 (%)')
+        self.mastitis_monitoring_plot.setLabel('bottom', '月份')
+        self.mastitis_monitoring_plot.showGrid(x=True, y=True, alpha=0.3)
+        self.mastitis_monitoring_plot.setBackground('white')
+        self.mastitis_monitoring_plot.addLegend()
+        self.mastitis_monitoring_plot.setMinimumHeight(250)
+        
+        right_layout.addWidget(self.mastitis_monitoring_plot)
+        
+        # 下部：可折叠的公式说明
+        formula_container = QWidget()
+        formula_layout = QVBoxLayout(formula_container)
+        formula_layout.setContentsMargins(0, 5, 0, 0)
+        
+        # 公式标题和折叠按钮
+        formula_header = QHBoxLayout()
+        formula_title = QLabel("📖 公式说明")
+        formula_title.setStyleSheet("font-weight: bold; font-size: 13px; color: #2c3e50;")
+        
+        self.formula_toggle_btn = QPushButton("▼ 展开")
+        self.formula_toggle_btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: none;
+                color: #3498db;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 2px 8px;
+            }
+            QPushButton:hover {
+                color: #2980b9;
+                background-color: #ecf0f1;
+                border-radius: 3px;
+            }
+        """)
+        self.formula_toggle_btn.clicked.connect(self.toggle_monitoring_formula_visibility)
+        
+        formula_header.addWidget(formula_title)
+        formula_header.addStretch()
+        formula_header.addWidget(self.formula_toggle_btn)
+        formula_layout.addLayout(formula_header)
+        
+        # 公式内容（初始隐藏）
+        self.monitoring_formula_widget = QTextEdit()
+        self.monitoring_formula_widget.setReadOnly(True)
+        self.monitoring_formula_widget.setMaximumHeight(180)
+        self.monitoring_formula_widget.setHtml(self.get_mastitis_monitoring_formula_html())
+        self.monitoring_formula_widget.setStyleSheet("""
+            QTextEdit {
+                border: 1px solid #ddd;
+                background-color: #f8f9fa;
+                font-family: 'Arial', sans-serif;
+                font-size: 11px;
+                padding: 8px;
+            }
+        """)
+        self.monitoring_formula_widget.setVisible(False)  # 初始隐藏
+        formula_layout.addWidget(self.monitoring_formula_widget)
+        
+        right_layout.addWidget(formula_container)
+        
+        # 添加到主分割器
+        main_splitter.addWidget(table_widget)
+        main_splitter.addWidget(right_widget)
+        main_splitter.setSizes([350, 450])  # 表格适中，右侧较宽
+        
+        tab_layout.addWidget(main_splitter)
+        
+        # 初始化变量
+        self.mastitis_monitoring_calculator = None
+        self.mastitis_monitoring_results = None
+        
+        self.result_sub_tabs.addTab(tab_widget, "👁️ 隐形乳房炎监测")
     
     def create_analysis_panel(self):
         """创建筛选分析面板（包含统计信息）"""
@@ -3644,7 +3923,7 @@ class MainWindow(QMainWindow):
         title_label = QLabel(title)
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         card_title_font_size = max(int(11 * 0.6), 10)
-        title_label.setStyleSheet(f"color: #6c757d; font-size: {card_title_font_size}px; margin-bottom: 5px;")
+        title_label.setStyleSheet(f"color: black; background-color: white; font-size: {card_title_font_size}px; margin-bottom: 5px; font-weight: bold;")
         layout.addWidget(title_label)
         
         # 数值
@@ -3658,7 +3937,7 @@ class MainWindow(QMainWindow):
         desc_label = QLabel(description)
         desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         card_desc_font_size = max(int(10 * 0.6), 9)
-        desc_label.setStyleSheet(f"color: #6c757d; font-size: {card_desc_font_size}px;")
+        desc_label.setStyleSheet(f"color: #495057; font-size: {card_desc_font_size}px; font-weight: 500;")
         desc_label.setWordWrap(True)
         layout.addWidget(desc_label)
         
@@ -3744,191 +4023,19 @@ class MainWindow(QMainWindow):
         
         # 移除单独处理缺少牛场编号的逻辑，改为在批量处理完成时统一处理
     
-    def handle_missing_farm_id(self, filename, missing_info):
-        """处理缺少牛场编号的情况"""
-        from PyQt6.QtWidgets import QInputDialog, QMessageBox
-        
-        msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Icon.Question)
-        msg.setWindowTitle("缺少牛场编号")
-        msg.setText(f"文件 '{missing_info['filename']}' 中缺少牛场编号列。")
-        msg.setInformativeText("这可能是老版本的DHI报告。请输入该文件对应的牛场编号：")
-        
-        # 添加输入框
-        farm_id, ok = QInputDialog.getText(
-            self, 
-            "输入牛场编号", 
-            f"请为文件 '{missing_info['filename']}' 输入牛场编号:\n\n注意：该文件中所有牛只都将使用此牛场编号", 
-            text=""
-        )
-        
-        if ok and farm_id.strip():
-            # 将牛场编号添加到对应的数据中
-            self.add_farm_id_to_data(filename, farm_id.strip())
-            self.statusBar().showMessage(f"已为 {filename} 设置牛场编号: {farm_id.strip()}")
-        else:
-            # 用户取消输入，显示警告
-            QMessageBox.warning(
-                self, 
-                "警告", 
-                f"未设置牛场编号，文件 '{missing_info['filename']}' 可能无法正常使用。"
-            )
-    
-    def add_farm_id_to_data(self, filename, farm_id):
-        """为指定文件的数据添加牛场编号"""
-        for data_item in self.data_list:
-            if data_item['filename'] == filename:
-                df = data_item['data']
-                if 'farm_id' not in df.columns:
-                    # 添加牛场编号列
-                    df['farm_id'] = farm_id
-                    logger.info(f"为文件 {filename} 添加牛场编号: {farm_id}")
-                    
-                    # 移除缺少牛场编号的标记
-                    if hasattr(df, 'attrs') and 'missing_farm_id_info' in df.attrs:
-                        del df.attrs['missing_farm_id_info']
-                    
-                    # 更新数据项
-                    data_item['data'] = df
-                break
+    # handle_missing_farm_id and add_farm_id_to_data methods removed - no longer needed for single-farm uploads
     
     def processing_completed(self, results):
         """所有文件处理完成"""
         self.progress_bar.setVisible(False)
         self.process_btn.setEnabled(True)
         
-        # 检查是否有缺少管理号的文件
-        missing_farm_id_files = results.get('missing_farm_id_files', [])
-        
-        if missing_farm_id_files:
-            # 弹出批量输入对话框
-            self.handle_batch_missing_farm_id(missing_farm_id_files, results)
-        else:
-            # 没有缺少管理号的文件，检查牧场编号一致性
-            self.check_and_handle_farm_id_consistency(results)
+        # 直接完成处理，无需检查牧场编号
+        self.complete_processing(results)
     
-    def handle_batch_missing_farm_id(self, missing_files, results):
-        """处理批量缺少管理号的情况"""
-        # 创建批量输入对话框
-        dialog = BatchFarmIdInputDialog(missing_files, self)
-        
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            # 用户确认输入，获取所有牛场编号
-            farm_ids = dialog.get_farm_ids()
-            
-            # 应用牛场编号到对应的数据
-            for file_info in missing_files:
-                filename = file_info['filename']
-                farm_id = farm_ids.get(filename)
-                if farm_id:
-                    # 更新数据中的牛场编号
-                    self.add_farm_id_to_data(filename, farm_id)
-            
-            # 重新收集牛场编号列表
-            all_farm_ids = set(results.get('farm_ids', []))
-            for farm_id in farm_ids.values():
-                all_farm_ids.add(farm_id)
-            results['farm_ids'] = sorted(list(all_farm_ids))
-            
-            # 在管理号输入完成后，检查牧场编号一致性
-            self.check_and_handle_farm_id_consistency(results)
-            
-            # 显示成功信息
-            QMessageBox.information(
-                self, 
-                "输入完成", 
-                f"已成功为 {len(missing_files)} 个文件设置牛场编号，可以开始筛选数据。"
-            )
-        else:
-            # 用户取消，显示警告并完成处理（但这些文件可能无法正常筛选）
-            QMessageBox.warning(
-                self,
-                "输入取消",
-                f"已取消为 {len(missing_files)} 个文件输入牛场编号。\n"
-                "这些文件的数据将无法正常参与筛选，建议重新处理。"
-            )
-            # 仍然完成处理，但用户需要知道影响
-            self.complete_processing(results)
+    # handle_batch_missing_farm_id method removed - no longer needed for single-farm uploads
     
-    def check_and_handle_farm_id_consistency(self, results):
-        """检查并处理牧场编号一致性"""
-        try:
-            # 获取所有数据
-            all_data = results.get('all_data', [])
-            if not all_data:
-                self.complete_processing(results)
-                return
-            
-            # 检查牧场编号一致性
-            is_consistent, all_farm_ids, farm_id_files_map = self.processor.check_farm_id_consistency(all_data)
-            
-            if not is_consistent and len(all_farm_ids) > 1:
-                # 发现多个不同的牧场编号，显示统一对话框
-                dialog = FarmIdUnificationDialog(farm_id_files_map, self)
-                
-                if dialog.exec() == QDialog.DialogCode.Accepted:
-                    # 用户选择了要统一的牧场编号
-                    target_farm_id = dialog.get_selected_farm_id()
-                    
-                    # 统一所有数据的牧场编号
-                    unified_data = self.processor.unify_farm_ids(all_data, target_farm_id)
-                    
-                    # 更新results中的数据
-                    results['all_data'] = unified_data
-                    
-                    # 更新牧场编号列表
-                    results['farm_ids'] = [target_farm_id]
-                    
-                    # 显示统一成功信息
-                    QMessageBox.information(
-                        self,
-                        "牧场编号统一完成",
-                        f"已成功将所有数据的牧场编号统一为：{target_farm_id}\n\n" +
-                        f"涉及{len(farm_id_files_map)}个不同的牧场编号，" +
-                        f"共{sum(len(files) for files in farm_id_files_map.values())}个文件。"
-                    )
-                    
-                    # 完成处理
-                    self.complete_processing(results)
-                else:
-                    # 用户取消了统一，提示风险并询问是否继续
-                    reply = QMessageBox.warning(
-                        self,
-                        "取消牧场编号统一",
-                        f"检测到{len(all_farm_ids)}个不同的牧场编号：{', '.join(all_farm_ids)}\n\n" +
-                        "不统一牧场编号可能会导致筛选结果不准确。\n" +
-                        "是否仍要继续处理？",
-                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-                    )
-                    
-                    if reply == QMessageBox.StandardButton.Yes:
-                        # 用户选择继续，保持原有的多个牧场编号
-                        self.complete_processing(results)
-                    else:
-                        # 用户选择取消，重置数据
-                        self.data_list = []
-                        self.file_info_widget.clear()
-                        self.file_info_widget.append("❌ 已取消文件处理。请重新上传文件。")
-                        self.statusBar().showMessage("已取消文件处理")
-            else:
-                # 牧场编号一致或只有一个牧场编号，直接完成处理
-                self.complete_processing(results)
-                
-        except Exception as e:
-            # 如果检查过程出错，记录错误并继续处理
-            import traceback
-            error_msg = f"检查牧场编号一致性时出错: {str(e)}"
-            print(f"ERROR: {error_msg}")
-            print(traceback.format_exc())
-            
-            QMessageBox.warning(
-                self,
-                "牧场编号检查失败",
-                f"检查牧场编号一致性时出现错误，将继续处理数据。\n\n错误信息：{str(e)}"
-            )
-            
-            # 仍然完成处理
-            self.complete_processing(results)
+    # check_and_handle_farm_id_consistency method removed - no longer needed for single-farm uploads
     
     def complete_processing(self, results):
         """完成处理流程"""
@@ -3942,10 +4049,10 @@ class MainWindow(QMainWindow):
         for item in self.data_list:
             df = item['data']
             all_data_combined.append(df)
-            if 'farm_id' in df.columns and 'management_id' in df.columns:
-                cow_pairs = df[['farm_id', 'management_id']].dropna()
-                for _, row in cow_pairs.iterrows():
-                    total_cows.add((row['farm_id'], row['management_id']))
+            if 'management_id' in df.columns:
+                cow_ids = df['management_id'].dropna().unique()
+                for cow_id in cow_ids:
+                    total_cows.add(cow_id)
         
         # 合并所有数据用于分析
         if all_data_combined:
@@ -3955,11 +4062,7 @@ class MainWindow(QMainWindow):
         # 更新全部数据统计
         getattr(self.total_data_card, 'value_label').setText(str(len(total_cows)))
         
-        # 更新牛场编号选择器
-        farm_ids = results['farm_ids']
-        self.farm_combo.clear()
-        self.farm_combo.addItem("全部牛场")
-        self.farm_combo.addItems(farm_ids)
+        # 牛场编号选择器已移除 - 单牛场上传不再需要
         
         # 检测重复文件并在文件信息框显示
         self.detect_and_display_duplicates()
@@ -3967,24 +4070,17 @@ class MainWindow(QMainWindow):
         # 显示处理结果
         success_count = len(results['success_files'])
         failed_count = len(results['failed_files'])
-        missing_count = len(results.get('missing_farm_id_files', []))
-        
         summary = f"\n📊 处理完成！\n"
         summary += f"成功: {success_count} 个文件\n"
-        summary += f"失败: {failed_count} 个文件\n"
-        if missing_count > 0:
-            summary += f"已补充牛场编号: {missing_count} 个文件\n"
-        summary += f"发现牛场: {len(farm_ids)} 个\n\n"
+        summary += f"失败: {failed_count} 个文件\n\n"
         
         self.file_info_widget.append(summary)
         
-        # 启用筛选按钮
-        if success_count > 0:
+        # 启用筛选按钮（如果存在）
+        if success_count > 0 and hasattr(self, 'filter_btn'):
             self.filter_btn.setEnabled(True)
         
         status_msg = f"处理完成：成功 {success_count} 个，失败 {failed_count} 个"
-        if missing_count > 0:
-            status_msg += f"，已补充牛场编号 {missing_count} 个"
         self.statusBar().showMessage(status_msg)
         
         # 提取并更新慢性感染牛识别的月份选择（如果有DHI数据）
@@ -4097,13 +4193,15 @@ class MainWindow(QMainWindow):
                 min_parity = int(parity_range['min'])
                 max_parity = int(parity_range['max'])
                 
-                                # 更新范围 - 使用实际数据范围但不设置上限
-                self.parity_min.setRange(min_parity, 99)
-                self.parity_max.setRange(min_parity, 99)
-                
-                # 设置默认值为数据范围
-                self.parity_min.setValue(min_parity)
-                self.parity_max.setValue(max_parity)
+                # 更新胎次控件（如果存在）
+                if hasattr(self, 'parity_min') and hasattr(self, 'parity_max'):
+                    # 更新范围 - 使用实际数据范围但不设置上限
+                    self.parity_min.setRange(min_parity, 99)
+                    self.parity_max.setRange(min_parity, 99)
+                    
+                    # 设置默认值为数据范围
+                    self.parity_min.setValue(min_parity)
+                    self.parity_max.setValue(max_parity)
             
                 print(f"  胎次控件更新: {min_parity}-{max_parity}胎")
             
@@ -4178,9 +4276,10 @@ class MainWindow(QMainWindow):
                     min_date = date_data.min().date()
                     max_date = date_data.max().date()
                     
-                    # 更新日期选择器
-                    self.date_start.setDate(QDate(min_date))
-                    self.date_end.setDate(QDate(max_date))
+                    # 更新日期选择器（如果存在）
+                    if hasattr(self, 'date_start') and hasattr(self, 'date_end'):
+                        self.date_start.setDate(QDate(min_date))
+                        self.date_end.setDate(QDate(max_date))
             
                     print(f"  日期范围更新: {min_date} 到 {max_date}")
             
@@ -4223,10 +4322,11 @@ class MainWindow(QMainWindow):
                     min_parity = int(parity_data.min())
                     max_parity = int(parity_data.max())
                     
-                    self.parity_min.setRange(min_parity, 99)
-                    self.parity_max.setRange(min_parity, 99)
-                    self.parity_min.setValue(min_parity)
-                    self.parity_max.setValue(max_parity)
+                    if hasattr(self, 'parity_min') and hasattr(self, 'parity_max'):
+                        self.parity_min.setRange(min_parity, 99)
+                        self.parity_max.setRange(min_parity, 99)
+                        self.parity_min.setValue(min_parity)
+                        self.parity_max.setValue(max_parity)
             
             # 更新蛋白率筛选控件（备用逻辑）
             if 'protein_pct' in df.columns and hasattr(self, 'protein_min'):
@@ -4289,7 +4389,7 @@ class MainWindow(QMainWindow):
     def start_filtering(self):
         """开始筛选"""
         if not self.data_list:
-            QMessageBox.warning(self, "警告", "请先处理文件")
+            self.show_warning("警告", "请先处理文件")
             return
         
         # 构建筛选条件
@@ -4301,7 +4401,7 @@ class MainWindow(QMainWindow):
         special_filter_names = []
         
         for filter_name, filter_config in filters.items():
-            if (filter_name not in ['farm_id', 'parity', 'date_range', 'future_lactation_days'] and 
+            if (filter_name not in ['parity', 'date_range', 'future_lactation_days'] and 
                 filter_config.get('enabled', False)):
                 special_filters_enabled = True
                 # 获取中文名称
@@ -4337,13 +4437,16 @@ class MainWindow(QMainWindow):
             if reply != QMessageBox.StandardButton.Yes:
                 return
         
-        # 显示/隐藏按钮
-        self.filter_btn.setEnabled(False)
-        self.filter_btn.setVisible(False)
-        self.cancel_filter_btn.setEnabled(True)
-        self.cancel_filter_btn.setVisible(True)
-        self.filter_progress.setVisible(True)
-        self.filter_progress.setValue(0)
+        # 显示/隐藏按钮（如果存在）
+        if hasattr(self, 'filter_btn'):
+            self.filter_btn.setEnabled(False)
+            self.filter_btn.setVisible(False)
+        if hasattr(self, 'cancel_filter_btn'):
+            self.cancel_filter_btn.setEnabled(True)
+            self.cancel_filter_btn.setVisible(True)
+        if hasattr(self, 'filter_progress'):
+            self.filter_progress.setVisible(True)
+            self.filter_progress.setValue(0)
         
         # 启动筛选线程（传递processor实例以共享在群牛数据）
         self.filter_thread = FilterThread(self.data_list, filters, selected_files, self.processor)
@@ -4359,30 +4462,41 @@ class MainWindow(QMainWindow):
         """构建筛选条件"""
         filters = {}
         
-        # 牛场编号
-        farm_id = self.farm_combo.currentText()
-        if farm_id and farm_id != "全部牛场":
-            filters['farm_id'] = {
-                'field': 'farm_id',
+        # 牛场编号筛选已移除 - 单牛场上传模式
+        
+        # 胎次（如果控件存在）
+        if hasattr(self, 'parity_min') and hasattr(self, 'parity_max'):
+            filters['parity'] = {
+                'field': 'parity',
                 'enabled': True,
-                'allowed': [farm_id]
+                'min': self.parity_min.value(),
+                'max': self.parity_max.value()
+            }
+        else:
+            # 使用默认值
+            filters['parity'] = {
+                'field': 'parity',
+                'enabled': True,
+                'min': 1,
+                'max': 99
             }
         
-        # 胎次
-        filters['parity'] = {
-            'field': 'parity',
-            'enabled': True,
-            'min': self.parity_min.value(),
-            'max': self.parity_max.value()
-        }
-        
-        # 日期范围
-        filters['date_range'] = {
-            'field': 'sample_date',
-            'enabled': True,
-            'start_date': self.date_start.date().toString("yyyy-MM-dd"),
-            'end_date': self.date_end.date().toString("yyyy-MM-dd")
-        }
+        # 日期范围（如果控件存在）
+        if hasattr(self, 'date_start') and hasattr(self, 'date_end'):
+            filters['date_range'] = {
+                'field': 'sample_date',
+                'enabled': True,
+                'start_date': self.date_start.date().toString("yyyy-MM-dd"),
+                'end_date': self.date_end.date().toString("yyyy-MM-dd")
+            }
+        else:
+            # 使用默认值（不限制日期）
+            filters['date_range'] = {
+                'field': 'sample_date',
+                'enabled': False,
+                'start_date': "1900-01-01",
+                'end_date': "2099-12-31"
+            }
         
         # 蛋白率筛选（新的独立筛选项）
         if hasattr(self, 'protein_enabled') and self.protein_enabled.isChecked():
@@ -4399,7 +4513,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'somatic_enabled') and self.somatic_enabled.isChecked():
             filters['somatic_cell_count'] = {
                 'field': 'somatic_cell_count',
-            'enabled': True,
+                'enabled': True,
                 'min': self.somatic_min.value(),
                 'max': self.somatic_max.value(),
                 'min_match_months': self.somatic_months.value(),
@@ -4418,21 +4532,33 @@ class MainWindow(QMainWindow):
                     'treat_empty_as_match': widget.empty_checkbox.isChecked()
         }
         
-        # 未来泌乳天数 - 根据复选框状态决定是否启用
-        filters['future_lactation_days'] = {
-            'field': 'future_lactation_days',
-            'enabled': self.future_days_enabled.isChecked(),
-            'min': self.future_days_min.value(),
-            'max': self.future_days_max.value(),
-            'plan_date': self.plan_date.date().toString("yyyy-MM-dd")
-        }
+        # 未来泌乳天数 - 根据复选框状态决定是否启用（如果控件存在）
+        if hasattr(self, 'future_days_enabled') and hasattr(self, 'plan_date'):
+            filters['future_lactation_days'] = {
+                'field': 'future_lactation_days',
+                'enabled': self.future_days_enabled.isChecked(),
+                'min': self.future_days_min.value(),
+                'max': self.future_days_max.value(),
+                'plan_date': self.plan_date.date().toString("yyyy-MM-dd")
+            }
+        else:
+            # 默认禁用未来泌乳天数筛选
+            filters['future_lactation_days'] = {
+                'field': 'future_lactation_days',
+                'enabled': False,
+                'min': 50,
+                'max': 350,
+                'plan_date': QDate.currentDate().addDays(30).toString("yyyy-MM-dd")
+            }
         
         return filters
     
     def update_filter_progress(self, status, progress):
         """更新筛选进度"""
-        self.filter_label.setText(status)
-        self.filter_progress.setValue(progress)
+        if hasattr(self, 'filter_label'):
+            self.filter_label.setText(status)
+        if hasattr(self, 'filter_progress'):
+            self.filter_progress.setValue(progress)
         self.statusBar().showMessage(status)
     
     def filtering_completed(self, success, message, results_df, stats=None):
@@ -4535,7 +4661,7 @@ class MainWindow(QMainWindow):
         
         # 首先过滤掉所有数据都为空的行
         # 检查每行是否至少有一个非空的关键字段
-        key_fields = ['farm_id', 'management_id', 'parity']
+        key_fields = ['management_id', 'parity']
         valid_rows = []
         
         for i, row in df.iterrows():
@@ -4557,7 +4683,6 @@ class MainWindow(QMainWindow):
         
         # 列名中英文映射
         column_mapping = {
-            'farm_id': '牛场编号',
             'management_id': '管理号',
             'parity': '最后一次取样时的胎次',
             '平均蛋白率(%)': '平均蛋白率(%)',
@@ -4843,17 +4968,10 @@ class MainWindow(QMainWindow):
         
         stats += f"📊 总记录数: {len(df)}\n"
         
-        # 统计唯一牛只数（基于farm_id和management_id）
-        if 'farm_id' in df.columns and 'management_id' in df.columns:
-            unique_cows = df[['farm_id', 'management_id']].drop_duplicates()
-            stats += f"🐄 符合条件牛只数: {len(unique_cows)}头\n"
-        
-        # 按牛场统计
-        if 'farm_id' in df.columns:
-            farm_counts = df['farm_id'].value_counts()
-            stats += f"\n🏢 各牛场记录数:\n"
-            for farm, count in farm_counts.items():
-                stats += f"  {farm}: {count} 条\n"
+        # 统计唯一牛只数（基于management_id）
+        if 'management_id' in df.columns:
+            unique_cows = df['management_id'].dropna().nunique()
+            stats += f"🐄 符合条件牛只数: {unique_cows}头\n"
         
         # 最后一个月泌乳天数统计
         if '最后一个月泌乳天数' in df.columns:
@@ -5023,7 +5141,7 @@ class MainWindow(QMainWindow):
                         stats += f"(范围: {trait_data.min():.2f}-{trait_data.max():.2f}{unit})\n"
                 stats += "\n"
         
-        if not milk_columns and not any(df.columns.str.contains(pattern) for _, pattern, _ in other_trait_patterns):
+        if not milk_columns and not any(df.columns.str.contains(pattern).any() for _, pattern, _ in other_trait_patterns):
             stats += "本次筛选结果中暂无其他性状数据。\n"
         
         self.other_traits_stats_widget.setText(stats)
@@ -5031,7 +5149,7 @@ class MainWindow(QMainWindow):
     def export_results(self):
         """导出结果"""
         if self.current_results.empty:
-            QMessageBox.warning(self, "警告", "没有可导出的结果")
+            self.show_warning("警告", "没有可导出的结果")
             return
         
         filename, _ = QFileDialog.getSaveFileName(
@@ -5115,7 +5233,6 @@ class MainWindow(QMainWindow):
         
         # 列名中英文映射（与界面显示一致）
         column_mapping = {
-            'farm_id': '牛场编号',
             'management_id': '管理号',
             'parity': '最后一次取样时的胎次',
             '平均蛋白率(%)': '平均蛋白率(%)',
@@ -5868,11 +5985,14 @@ class MainWindow(QMainWindow):
     
     def _reset_filter_ui_state(self):
         """重置筛选UI状态"""
-        self.filter_progress.setVisible(False)
-        self.filter_btn.setEnabled(True)
-        self.filter_btn.setVisible(True)
-        self.cancel_filter_btn.setEnabled(False)
-        self.cancel_filter_btn.setVisible(False)
+        if hasattr(self, 'filter_progress'):
+            self.filter_progress.setVisible(False)
+        if hasattr(self, 'filter_btn'):
+            self.filter_btn.setEnabled(True)
+            self.filter_btn.setVisible(True)
+        if hasattr(self, 'cancel_filter_btn'):
+            self.cancel_filter_btn.setEnabled(False)
+            self.cancel_filter_btn.setVisible(False)
     
     def _get_enabled_traits(self):
         """获取当前启用的性状列表"""
@@ -5925,7 +6045,7 @@ class MainWindow(QMainWindow):
                 monthly_columns.append(col)
             elif trait == 'somatic_cell_count' and '体细胞数(万/ml)' in col and '年' in col and '月' in col:
                 monthly_columns.append(col)
-            elif trait == 'fat_pct' and '脂肪率(%)' in col and '年' in col and '月' in col:
+            elif trait == 'fat_pct' and '乳脂率(%)' in col and '年' in col and '月' in col:
                 monthly_columns.append(col)
             elif trait == 'lactose_pct' and '乳糖率(%)' in col and '年' in col and '月' in col:
                 monthly_columns.append(col)
@@ -6150,14 +6270,14 @@ class MainWindow(QMainWindow):
         
         # 文件名标签
         name_label = QLabel(f"📄 {file_config['name']}")
-        name_label.setStyleSheet("font-weight: bold; font-size: 14px; color: #2c3e50;")
+        name_label.setStyleSheet("font-weight: bold; font-size: 14px; color: black; background-color: white;")
         layout.addWidget(name_label)
         
         # 字段映射显示
         if file_config.get('custom', False):
             # 自定义系统，显示可编辑的字段映射
             mapping_label = QLabel("字段映射（所需数据 → 表头列名）：")
-            mapping_label.setStyleSheet("font-weight: bold; color: #34495e; margin-top: 8px;")
+            mapping_label.setStyleSheet("font-weight: bold; color: black; margin-top: 8px; background-color: white;")
             layout.addWidget(mapping_label)
             
             # 创建字段映射编辑区域
@@ -6174,12 +6294,12 @@ class MainWindow(QMainWindow):
                 # 所需数据标签
                 field_label = QLabel(f"{required_field}:")
                 field_label.setFixedWidth(120)
-                field_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+                field_label.setStyleSheet("font-weight: bold; color: black; background-color: white;")
                 field_layout.addWidget(field_label)
                 
                 # 箭头
                 arrow_label = QLabel("→")
-                arrow_label.setStyleSheet("color: #7f8c8d; font-size: 14px;")
+                arrow_label.setStyleSheet("color: black; font-size: 14px; background-color: white; font-weight: bold;")
                 field_layout.addWidget(arrow_label)
                 
                 # 输入框
@@ -6191,6 +6311,8 @@ class MainWindow(QMainWindow):
                         border: 1px solid #bdc3c7;
                         border-radius: 4px;
                         background-color: white;
+                        color: black;
+                        font-weight: bold;
                     }
                 """)
                 field_layout.addWidget(input_edit)
@@ -6207,7 +6329,7 @@ class MainWindow(QMainWindow):
         else:
             # 固定系统，只显示字段映射关系
             mapping_label = QLabel("字段映射（所需数据 → 表头列名）：")
-            mapping_label.setStyleSheet("font-weight: bold; color: #34495e; margin-top: 8px;")
+            mapping_label.setStyleSheet("font-weight: bold; color: black; margin-top: 8px; background-color: white;")
             layout.addWidget(mapping_label)
             
             # 创建字段映射显示区域
@@ -6218,13 +6340,14 @@ class MainWindow(QMainWindow):
             mapping_display = QLabel("\n".join(mapping_text))
             mapping_display.setStyleSheet("""
                 QLabel {
-                    color: #555;
+                    color: black;
                     font-size: 12px;
                     padding: 8px;
                     background-color: #f8f9fa;
                     border: 1px solid #e9ecef;
                     border-radius: 4px;
                     margin-bottom: 8px;
+                    font-weight: bold;
                 }
             """)
             layout.addWidget(mapping_display)
@@ -6247,7 +6370,9 @@ class MainWindow(QMainWindow):
                 padding: 8px;
                 border: 2px solid #bdc3c7;
                 border-radius: 4px;
-                background-color: #ecf0f1;
+                background-color: white;
+                color: black;
+                font-weight: bold;
             }
         """)
         upload_layout.addWidget(file_path_edit)
@@ -6274,7 +6399,7 @@ class MainWindow(QMainWindow):
         
         # 状态标签
         status_label = QLabel("未选择")
-        status_label.setStyleSheet("color: #999; font-size: 12px; margin-top: 4px;")
+        status_label.setStyleSheet("color: black; font-size: 12px; margin-top: 4px; background-color: white; font-weight: bold;")
         layout.addWidget(status_label)
         
         # 保存引用
@@ -6582,6 +6707,11 @@ class MainWindow(QMainWindow):
         """更新慢性感染牛识别的月份选择选项"""
         print(f"开始更新慢性感染牛月份选项: {available_months}")
         
+        # 检查chronic_months_widget是否存在
+        if not hasattr(self, 'chronic_months_widget'):
+            print("chronic_months_widget不存在，跳过月份选项更新")
+            return
+        
         # 清空现有布局
         layout = self.chronic_months_widget.layout()
         for i in reversed(range(layout.count())):
@@ -6657,7 +6787,7 @@ class MainWindow(QMainWindow):
         
         # 启用复选框
         enabled_cb = QCheckBox(f"{icon} {method_name}")
-        enabled_cb.setStyleSheet("font-weight: bold; color: #333;")
+        enabled_cb.setStyleSheet("font-weight: bold; color: black; background-color: white;")
         enabled_cb.setChecked(True)  # 默认启用
         title_layout.addWidget(enabled_cb)
         title_layout.addStretch()
@@ -6691,7 +6821,9 @@ class MainWindow(QMainWindow):
             
             yield_widget = QWidget()
             yield_widget.setLayout(yield_layout)
-            config_layout.addRow("产奶量:", yield_widget)
+            yield_label = QLabel("产奶量:")
+            yield_label.setStyleSheet("color: black; background-color: white; font-weight: bold;")
+            config_layout.addRow(yield_label, yield_widget)
             widget.yield_combo = yield_combo
             widget.yield_spin = yield_spin
             
@@ -6716,7 +6848,9 @@ class MainWindow(QMainWindow):
             
             yield_widget = QWidget()
             yield_widget.setLayout(yield_layout)
-            config_layout.addRow("产奶量:", yield_widget)
+            yield_label2 = QLabel("产奶量:")
+            yield_label2.setStyleSheet("color: black; background-color: white; font-weight: bold;")
+            config_layout.addRow(yield_label2, yield_widget)
             widget.yield_combo = yield_combo
             widget.yield_spin = yield_spin
             
@@ -6992,7 +7126,7 @@ class MainWindow(QMainWindow):
             if not selected_months:
                 error_msg = "❌ 请至少选择一个月份进行慢性感染牛识别"
                 self.process_log_widget.append(error_msg)
-                QMessageBox.warning(self, "月份选择错误", "请至少选择一个月份进行慢性感染牛识别")
+                self.show_warning("月份选择错误", "请至少选择一个月份进行慢性感染牛识别")
                 self.mastitis_progress.setVisible(False)
                 self.progress_status_label.setVisible(False)
                 return
@@ -7124,17 +7258,22 @@ class MainWindow(QMainWindow):
             self.mastitis_status_label.setText("筛查失败")
     
     def display_mastitis_results_in_table(self, results_df):
-        """将慢性乳房炎筛查结果显示到右侧筛选结果表格"""
+        """将慢性乳房炎筛查结果显示到慢性乳房炎筛查结果表格"""
         try:
-            # 切换到筛选结果标签页
-            self.tab_widget.setCurrentWidget(self.result_table)
+            # 切换到筛选结果标签页，然后切换到慢性乳房炎筛查子标签页
+            self.tab_widget.setCurrentWidget(self.result_widget)
+            # 切换到慢性乳房炎筛查子标签页
+            for i in range(self.result_sub_tabs.count()):
+                if "慢性乳房炎筛查" in self.result_sub_tabs.tabText(i):
+                    self.result_sub_tabs.setCurrentIndex(i)
+                    break
             
             # 设置表格行列数
-            self.result_table.setRowCount(len(results_df))
-            self.result_table.setColumnCount(len(results_df.columns))
+            self.mastitis_screening_table.setRowCount(len(results_df))
+            self.mastitis_screening_table.setColumnCount(len(results_df.columns))
             
             # 设置表头
-            self.result_table.setHorizontalHeaderLabels(results_df.columns.tolist())
+            self.mastitis_screening_table.setHorizontalHeaderLabels(results_df.columns.tolist())
             
             # 填充数据
             for i in range(len(results_df)):
@@ -7154,22 +7293,22 @@ class MainWindow(QMainWindow):
                         elif '治疗' in str(value):
                             item.setBackground(QColor(248, 249, 250))  # 淡灰色
                     
-                    self.result_table.setItem(i, j, item)
+                    self.mastitis_screening_table.setItem(i, j, item)
             
             # 调整列宽
-            self.result_table.resizeColumnsToContents()
+            self.mastitis_screening_table.resizeColumnsToContents()
             
             # 限制列宽最大值
-            for col in range(self.result_table.columnCount()):
-                if self.result_table.columnWidth(col) > 200:
-                    self.result_table.setColumnWidth(col, 200)
+            for col in range(self.mastitis_screening_table.columnCount()):
+                if self.mastitis_screening_table.columnWidth(col) > 200:
+                    self.mastitis_screening_table.setColumnWidth(col, 200)
             
             # 启用排序
-            self.result_table.setSortingEnabled(True)
+            self.mastitis_screening_table.setSortingEnabled(True)
             
             # 在处理过程中添加结果说明
             result_summary = f"""
-📊 结果已显示在筛选结果表格中
+📊 结果已显示在慢性乳房炎筛查结果表格中
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 🎯 筛查结果摘要:
@@ -7183,6 +7322,8 @@ class MainWindow(QMainWindow):
 🔵 瞎乳区 - 淡蓝色背景
 🟢 提前干奶 - 淡绿色背景
 ⚪ 治疗 - 淡灰色背景
+
+📍 查看结果：点击右侧"筛查结果"标签页中的"慢性乳房炎筛查"子标签
 """
             self.process_log_widget.append(result_summary)
             
@@ -7425,6 +7566,766 @@ class MainWindow(QMainWindow):
         
         # 显示对话框
         dialog.exec()
+    
+    def start_mastitis_monitoring(self):
+        """启动隐形乳房炎月度监测分析"""
+        try:
+            # 检查数据是否可用
+            if not hasattr(self, 'data_list') or not self.data_list:
+                self.show_warning("警告", "请先在'DHI基础筛选'标签页中上传DHI数据")
+                return
+            
+            # 获取阈值设置
+            scc_threshold = self.monitoring_scc_threshold.value()
+            
+            # 从监测计算模块导入
+            from mastitis_monitoring import MastitisMonitoringCalculator
+            
+            # 创建监测计算器
+            self.mastitis_monitoring_calculator = MastitisMonitoringCalculator(scc_threshold=scc_threshold)
+            
+            # 准备DHI数据
+            dhi_data_list = []
+            for item in self.data_list:
+                if item['data'] is not None and not item['data'].empty:
+                    dhi_data_list.append(item['data'])
+            
+            if len(dhi_data_list) == 0:
+                QMessageBox.warning(self, "警告", "没有可用的DHI数据进行分析")
+                return
+            
+            # 加载DHI数据
+            load_result = self.mastitis_monitoring_calculator.load_dhi_data(dhi_data_list)
+            
+            if not load_result['success']:
+                QMessageBox.critical(self, "错误", f"DHI数据加载失败: {load_result.get('error', '未知错误')}")
+                return
+            
+            # 加载牛群基础信息（如果有）
+            if hasattr(self, 'cattle_basic_info') and self.cattle_basic_info is not None:
+                cattle_result = self.mastitis_monitoring_calculator.load_cattle_basic_info(
+                    self.cattle_basic_info, self.current_system)
+                if not cattle_result['success']:
+                    QMessageBox.warning(self, "提示", f"牛群基础信息加载失败: {cattle_result.get('error', '未知错误')}\n将无法计算干奶前流行率")
+            
+            # 执行计算
+            self.start_monitoring_btn.setText("计算中...")
+            self.start_monitoring_btn.setEnabled(False)
+            QApplication.processEvents()
+            
+            results = self.mastitis_monitoring_calculator.calculate_all_indicators()
+            
+            if not results['success']:
+                QMessageBox.critical(self, "错误", f"指标计算失败: {results.get('error', '未知错误')}")
+                self.start_monitoring_btn.setText("开始分析")
+                self.start_monitoring_btn.setEnabled(True)
+                return
+            
+            # 保存结果
+            self.mastitis_monitoring_results = results
+            
+            # 显示结果
+            self.display_mastitis_monitoring_results(results)
+            
+            # 启用导出按钮
+            self.export_monitoring_btn.setEnabled(True)
+            
+            # 重置按钮
+            self.start_monitoring_btn.setText("重新分析")
+            self.start_monitoring_btn.setEnabled(True)
+            
+            QMessageBox.information(self, "完成", f"隐形乳房炎监测分析完成！\n分析了{results['month_count']}个月份的数据")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"分析过程中发生错误: {str(e)}")
+            logger.error(f"隐形乳房炎监测分析失败: {e}")
+            self.start_monitoring_btn.setText("开始分析")
+            self.start_monitoring_btn.setEnabled(True)
+    
+    def display_mastitis_monitoring_results(self, results):
+        """显示隐形乳房炎监测结果"""
+        try:
+            # 更新表格
+            self.update_monitoring_table(results)
+            
+            # 更新图表
+            self.update_monitoring_chart(results)
+            
+        except Exception as e:
+            logger.error(f"显示监测结果失败: {e}")
+            QMessageBox.warning(self, "警告", f"显示结果失败: {str(e)}")
+    
+    def update_monitoring_table(self, results):
+        """更新监测结果表格"""
+        try:
+            months = results['months']
+            indicators = results['indicators']
+            
+            # 定义表格列
+            columns = [
+                '月份', '当月流行率(%)', '新发感染率(%)', '慢性感染率(%)', 
+                '慢性感染牛占比(%)', '头胎首测流行率(%)', '经产首测流行率(%)', '干奶前流行率(%)'
+            ]
+            
+            self.mastitis_monitoring_table.setColumnCount(len(columns))
+            self.mastitis_monitoring_table.setHorizontalHeaderLabels(columns)
+            self.mastitis_monitoring_table.setRowCount(len(months))
+            
+            for row, month in enumerate(months):
+                month_data = indicators.get(month, {})
+                
+                # 月份
+                self.mastitis_monitoring_table.setItem(row, 0, QTableWidgetItem(month))
+                
+                # 当月流行率
+                cp = month_data.get('current_prevalence', {})
+                cp_value = f"{cp['value']:.1f}" if cp.get('value') is not None else "N/A"
+                cp_item = QTableWidgetItem(cp_value)
+                if cp.get('value') is not None:
+                    cp_item.setToolTip(cp.get('formula', ''))
+                self.mastitis_monitoring_table.setItem(row, 1, cp_item)
+                
+                # 新发感染率
+                nir = month_data.get('new_infection_rate', {})
+                nir_value = f"{nir['value']:.1f}" if nir.get('value') is not None else "N/A"
+                nir_item = QTableWidgetItem(nir_value)
+                if nir.get('value') is not None:
+                    tooltip = nir.get('formula', '')
+                    if nir.get('warning'):
+                        tooltip += f"\n⚠️ {nir['warning']}"
+                    nir_item.setToolTip(tooltip)
+                self.mastitis_monitoring_table.setItem(row, 2, nir_item)
+                
+                # 慢性感染率
+                cir = month_data.get('chronic_infection_rate', {})
+                cir_value = f"{cir['value']:.1f}" if cir.get('value') is not None else "N/A"
+                cir_item = QTableWidgetItem(cir_value)
+                if cir.get('value') is not None:
+                    tooltip = cir.get('formula', '')
+                    if cir.get('warning'):
+                        tooltip += f"\n⚠️ {cir['warning']}"
+                    cir_item.setToolTip(tooltip)
+                self.mastitis_monitoring_table.setItem(row, 3, cir_item)
+                
+                # 慢性感染牛占比
+                cip = month_data.get('chronic_infection_proportion', {})
+                cip_value = f"{cip['value']:.1f}" if cip.get('value') is not None else "N/A"
+                cip_item = QTableWidgetItem(cip_value)
+                if cip.get('value') is not None:
+                    tooltip = cip.get('formula', '')
+                    if cip.get('warning'):
+                        tooltip += f"\n⚠️ {cip['warning']}"
+                    cip_item.setToolTip(tooltip)
+                self.mastitis_monitoring_table.setItem(row, 4, cip_item)
+                
+                # 头胎首测流行率
+                ftp = month_data.get('first_test_prevalence', {})
+                primi_value = "N/A"
+                if ftp and 'primiparous' in ftp:
+                    primi_data = ftp['primiparous']
+                    primi_value = f"{primi_data['value']:.1f}" if primi_data.get('value') is not None else "N/A"
+                primi_item = QTableWidgetItem(primi_value)
+                if ftp and 'primiparous' in ftp:
+                    primi_item.setToolTip(ftp['primiparous'].get('formula', ''))
+                self.mastitis_monitoring_table.setItem(row, 5, primi_item)
+                
+                # 经产首测流行率
+                multi_value = "N/A"
+                if ftp and 'multiparous' in ftp:
+                    multi_data = ftp['multiparous']
+                    multi_value = f"{multi_data['value']:.1f}" if multi_data.get('value') is not None else "N/A"
+                multi_item = QTableWidgetItem(multi_value)
+                if ftp and 'multiparous' in ftp:
+                    multi_item.setToolTip(ftp['multiparous'].get('formula', ''))
+                self.mastitis_monitoring_table.setItem(row, 6, multi_item)
+                
+                # 干奶前流行率（只在最新月份显示）
+                pdp = month_data.get('pre_dry_prevalence', {})
+                is_latest_month = (row == len(months) - 1)  # 判断是否为最新月份
+                
+                if is_latest_month and pdp.get('value') is not None:
+                    # 最新月份且有数值
+                    pdp_value = f"{pdp['value']:.1f}"
+                    pdp_item = QTableWidgetItem(pdp_value)
+                    
+                    # 设置详细的工具提示，包含诊断信息
+                    if pdp.get('formula'):
+                        # 将HTML标签转换为纯文本用于工具提示
+                        tooltip_text = pdp.get('formula', '').replace('<br/>', '\n').replace('　', '  ')
+                        # 移除HTML标签
+                        import re
+                        tooltip_text = re.sub(r'<[^>]+>', '', tooltip_text)
+                        pdp_item.setToolTip(tooltip_text)
+                    
+                    # 设置成功计算的颜色
+                    pdp_item.setBackground(QColor('#e8f5e8'))  # 浅绿色
+                    
+                elif is_latest_month and pdp.get('formula'):
+                    # 最新月份但计算失败，显示具体错误
+                    pdp_value = "N/A"
+                    pdp_item = QTableWidgetItem(pdp_value)
+                    
+                    # 设置详细的工具提示，包含诊断信息
+                    tooltip_text = pdp.get('formula', '').replace('<br/>', '\n').replace('　', '  ')
+                    # 移除HTML标签
+                    import re
+                    tooltip_text = re.sub(r'<[^>]+>', '', tooltip_text)
+                    pdp_item.setToolTip(tooltip_text)
+                    
+                    # 根据诊断结果设置不同的颜色
+                    diagnosis = pdp.get('diagnosis', '')
+                    if diagnosis in ['缺少牛群基础信息', '数据无法匹配']:
+                        pdp_item.setBackground(QColor('#ffebee'))  # 浅红色
+                        pdp_item.setForeground(QColor('black'))  # 黑色字体
+                    elif diagnosis in ['缺少在胎天数字段', '匹配牛只无在胎天数数据', '无符合干奶前条件的牛只']:
+                        pdp_item.setBackground(QColor('#fff3e0'))  # 浅橙色
+                        pdp_item.setForeground(QColor('black'))  # 黑色字体
+                else:
+                    # 非最新月份，显示"-"
+                    pdp_value = "-"
+                    pdp_item = QTableWidgetItem(pdp_value)
+                    pdp_item.setToolTip("干奶前流行率只在最新月份计算")
+                    pdp_item.setForeground(QColor('black'))  # 黑色字体
+                
+                self.mastitis_monitoring_table.setItem(row, 7, pdp_item)
+            
+            # 调整列宽
+            self.mastitis_monitoring_table.resizeColumnsToContents()
+            
+        except Exception as e:
+            logger.error(f"更新监测表格失败: {e}")
+            raise
+    
+    def update_monitoring_chart(self, results):
+        """更新监测趋势图表"""
+        try:
+            import pyqtgraph as pg
+            
+            # 清除现有图表
+            self.mastitis_monitoring_plot.clear()
+            
+            months = results['months']
+            indicators = results['indicators']
+            
+            if len(months) == 0:
+                return
+            
+            # 准备数据
+            x_values = list(range(len(months)))
+            x_labels = months
+            
+            # 定义线条样式
+            line_styles = [
+                {'color': '#e74c3c', 'width': 2, 'style': None},  # 当月流行率 - 红色
+                {'color': '#f39c12', 'width': 2, 'style': None},  # 新发感染率 - 橙色  
+                {'color': '#9b59b6', 'width': 2, 'style': None},  # 慢性感染率 - 紫色
+                {'color': '#3498db', 'width': 2, 'style': None},  # 慢性感染牛占比 - 蓝色
+                {'color': '#27ae60', 'width': 2, 'style': None},  # 首测流行率 - 绿色
+            ]
+            
+            line_index = 0
+            
+            # 绘制各指标线条（默认显示所有指标）
+            # 1. 当月流行率
+            y_values = []
+            for month in months:
+                cp = indicators[month].get('current_prevalence', {})
+                y_values.append(cp.get('value', None))
+            
+            valid_points = [(x, y) for x, y in zip(x_values, y_values) if y is not None]
+            if valid_points:
+                x_valid, y_valid = zip(*valid_points)
+                self.mastitis_monitoring_plot.plot(
+                    x_valid, y_valid, 
+                    pen=pg.mkPen(color=line_styles[line_index]['color'], width=line_styles[line_index]['width']),
+                    symbol='o', symbolSize=8, symbolBrush=line_styles[line_index]['color'],
+                    name='当月流行率'
+                )
+            line_index += 1
+            
+            # 2. 新发感染率
+            y_values = []
+            for month in months:
+                nir = indicators[month].get('new_infection_rate', {})
+                y_values.append(nir.get('value', None))
+            
+            valid_points = [(x, y) for x, y in zip(x_values, y_values) if y is not None]
+            if valid_points:
+                x_valid, y_valid = zip(*valid_points)
+                self.mastitis_monitoring_plot.plot(
+                    x_valid, y_valid,
+                    pen=pg.mkPen(color=line_styles[line_index]['color'], width=line_styles[line_index]['width']),
+                    symbol='s', symbolSize=8, symbolBrush=line_styles[line_index]['color'],
+                    name='新发感染率'
+                )
+            line_index += 1
+            
+            # 3. 慢性感染率
+            y_values = []
+            for month in months:
+                cir = indicators[month].get('chronic_infection_rate', {})
+                y_values.append(cir.get('value', None))
+            
+            valid_points = [(x, y) for x, y in zip(x_values, y_values) if y is not None]
+            if valid_points:
+                x_valid, y_valid = zip(*valid_points)
+                self.mastitis_monitoring_plot.plot(
+                    x_valid, y_valid,
+                    pen=pg.mkPen(color=line_styles[line_index]['color'], width=line_styles[line_index]['width']),
+                    symbol='t', symbolSize=8, symbolBrush=line_styles[line_index]['color'],
+                    name='慢性感染率'
+                )
+            line_index += 1
+            
+            # 4. 慢性感染牛占比
+            y_values = []
+            for month in months:
+                cip = indicators[month].get('chronic_infection_proportion', {})
+                y_values.append(cip.get('value', None))
+            
+            valid_points = [(x, y) for x, y in zip(x_values, y_values) if y is not None]
+            if valid_points:
+                x_valid, y_valid = zip(*valid_points)
+                self.mastitis_monitoring_plot.plot(
+                    x_valid, y_valid,
+                    pen=pg.mkPen(color=line_styles[line_index]['color'], width=line_styles[line_index]['width']),
+                    symbol='d', symbolSize=8, symbolBrush=line_styles[line_index]['color'],
+                    name='慢性感染牛占比'
+                )
+            line_index += 1
+            
+            # 5. 首测流行率（头胎）
+            y_values = []
+            for month in months:
+                ftp = indicators[month].get('first_test_prevalence', {})
+                if ftp and 'primiparous' in ftp:
+                    y_values.append(ftp['primiparous'].get('value', None))
+                else:
+                    y_values.append(None)
+            
+            valid_points = [(x, y) for x, y in zip(x_values, y_values) if y is not None]
+            if valid_points:
+                x_valid, y_valid = zip(*valid_points)
+                self.mastitis_monitoring_plot.plot(
+                    x_valid, y_valid,
+                    pen=pg.mkPen(color=line_styles[line_index]['color'], width=line_styles[line_index]['width'], style=pg.QtCore.Qt.PenStyle.DashLine),
+                    symbol='+', symbolSize=10, symbolBrush=line_styles[line_index]['color'],
+                    name='头胎首测流行率'
+                )
+            
+            # 设置X轴标签
+            x_axis = self.mastitis_monitoring_plot.getAxis('bottom')
+            x_axis.setTicks([[(i, month) for i, month in enumerate(months)]])
+            
+            # 设置Y轴范围
+            self.mastitis_monitoring_plot.setYRange(0, 100)
+            
+        except Exception as e:
+            logger.error(f"更新监测图表失败: {e}")
+            raise
+    
+    def export_monitoring_results(self):
+        """导出隐形乳房炎监测结果到Excel"""
+        try:
+            if not self.mastitis_monitoring_results:
+                QMessageBox.warning(self, "警告", "没有可导出的监测结果")
+                return
+            
+            # 选择保存路径
+            file_path, _ = QFileDialog.getSaveFileName(
+                self, "导出监测结果", 
+                f"隐形乳房炎监测结果_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                "Excel文件 (*.xlsx)"
+            )
+            
+            if not file_path:
+                return
+            
+            # 准备导出数据
+            results = self.mastitis_monitoring_results
+            months = results['months']
+            indicators = results['indicators']
+            
+            # 创建DataFrame
+            export_data = []
+            for month in months:
+                month_data = indicators.get(month, {})
+                
+                row = {
+                    '月份': month,
+                    '当月流行率(%)': self._get_indicator_value(month_data, 'current_prevalence'),
+                    '当月流行率_公式': self._get_indicator_formula(month_data, 'current_prevalence'),
+                    '新发感染率(%)': self._get_indicator_value(month_data, 'new_infection_rate'),
+                    '新发感染率_公式': self._get_indicator_formula(month_data, 'new_infection_rate'),
+                    '慢性感染率(%)': self._get_indicator_value(month_data, 'chronic_infection_rate'),
+                    '慢性感染率_公式': self._get_indicator_formula(month_data, 'chronic_infection_rate'),
+                    '慢性感染牛占比(%)': self._get_indicator_value(month_data, 'chronic_infection_proportion'),
+                    '慢性感染牛占比_公式': self._get_indicator_formula(month_data, 'chronic_infection_proportion'),
+                    '头胎首测流行率(%)': self._get_first_test_value(month_data, 'primiparous'),
+                    '头胎首测流行率_公式': self._get_first_test_formula(month_data, 'primiparous'),
+                    '经产首测流行率(%)': self._get_first_test_value(month_data, 'multiparous'),
+                    '经产首测流行率_公式': self._get_first_test_formula(month_data, 'multiparous'),
+                    '干奶前流行率(%)': self._get_indicator_value(month_data, 'pre_dry_prevalence'),
+                    '干奶前流行率_公式': self._get_indicator_formula(month_data, 'pre_dry_prevalence'),
+                }
+                export_data.append(row)
+            
+            df = pd.DataFrame(export_data)
+            
+            # 保存到Excel
+            with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
+                df.to_excel(writer, sheet_name='监测结果', index=False)
+                
+                # 添加汇总信息sheet
+                summary_data = {
+                    '项目': ['分析日期', '体细胞阈值', '分析月份数', '日期范围', '月份连续性'],
+                    '值': [
+                        datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                        f"{results['scc_threshold']}万/ml",
+                        results['month_count'],
+                        f"{months[0]} 至 {months[-1]}" if months else "无",
+                        "连续" if results['continuity_check']['is_continuous'] else f"不连续，缺失：{', '.join(results['continuity_check']['missing_months'])}"
+                    ]
+                }
+                summary_df = pd.DataFrame(summary_data)
+                summary_df.to_excel(writer, sheet_name='分析汇总', index=False)
+            
+            self.show_export_success_dialog(f"隐形乳房炎监测结果已成功导出！", file_path)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"导出失败: {str(e)}")
+            logger.error(f"导出监测结果失败: {e}")
+    
+    def _get_indicator_value(self, month_data, indicator_name):
+        """获取指标数值"""
+        indicator = month_data.get(indicator_name, {})
+        value = indicator.get('value')
+        return f"{value:.1f}" if value is not None else "N/A"
+    
+    def _get_indicator_formula(self, month_data, indicator_name):
+        """获取指标公式"""
+        indicator = month_data.get(indicator_name, {})
+        return indicator.get('formula', '')
+    
+    def _get_first_test_value(self, month_data, test_type):
+        """获取首测流行率数值"""
+        ftp = month_data.get('first_test_prevalence', {})
+        if ftp and test_type in ftp:
+            value = ftp[test_type].get('value')
+            return f"{value:.1f}" if value is not None else "N/A"
+        return "N/A"
+    
+    def _get_first_test_formula(self, month_data, test_type):
+        """获取首测流行率公式"""
+        ftp = month_data.get('first_test_prevalence', {})
+        if ftp and test_type in ftp:
+            return ftp[test_type].get('formula', '')
+        return ""
+    
+    def toggle_monitoring_formula_visibility(self):
+        """切换隐形乳房炎监测公式说明的显示/隐藏状态"""
+        if self.monitoring_formula_widget.isVisible():
+            self.monitoring_formula_widget.setVisible(False)
+            self.formula_toggle_btn.setText("▼ 展开公式详情")
+        else:
+            self.monitoring_formula_widget.setVisible(True)
+            self.formula_toggle_btn.setText("▲ 收起公式详情")
+    
+    def update_monitoring_threshold(self):
+        """更新隐形乳房炎监测的体细胞阈值"""
+        if hasattr(self, 'mastitis_monitoring_calculator') and self.mastitis_monitoring_calculator:
+            new_threshold = self.monitoring_scc_threshold.value()
+            self.mastitis_monitoring_calculator.set_scc_threshold(new_threshold)
+            logger.info(f"体细胞阈值已更新为: {new_threshold} 万/ml")
+    
+    def update_monitoring_display(self):
+        """更新隐形乳房炎监测显示（重新计算并显示结果）"""
+        if hasattr(self, 'mastitis_monitoring_results') and self.mastitis_monitoring_results:
+            # 重新计算指标
+            results = self.mastitis_monitoring_calculator.calculate_all_indicators()
+            if results['success']:
+                self.mastitis_monitoring_results = results
+                self.display_mastitis_monitoring_results(results)
+            else:
+                QMessageBox.warning(self, "更新失败", f"重新计算失败: {results.get('error', '未知错误')}")
+    
+    def upload_dhi_for_monitoring(self):
+        """为隐形乳房炎监测上传DHI数据"""
+        files, _ = QFileDialog.getOpenFileNames(
+            self,
+            "选择DHI报告文件（隐形乳房炎监测）",
+            "",
+            "支持的文件 (*.zip *.xlsx);;ZIP文件 (*.zip);;Excel文件 (*.xlsx)"
+        )
+        
+        if not files:
+            return
+        
+        try:
+            # 显示处理进度
+            progress_dialog = QProgressDialog("正在处理DHI文件...", "取消", 0, len(files), self)
+            progress_dialog.setWindowModality(Qt.WindowModal)
+            progress_dialog.show()
+            
+            # 处理DHI文件
+            from data_processor import DataProcessor
+            processor = DataProcessor()
+            
+            all_dhi_data = []
+            success_files = []
+            failed_files = []
+            
+            for i, file_path in enumerate(files):
+                if progress_dialog.wasCanceled():
+                    break
+                
+                filename = os.path.basename(file_path)
+                progress_dialog.setLabelText(f"处理: {filename}")
+                progress_dialog.setValue(i)
+                QApplication.processEvents()
+                
+                try:
+                    # 处理单个DHI文件
+                    success, message, df = processor.process_file(file_path, filename)
+                    
+                    if success and df is not None and not df.empty:
+                        all_dhi_data.append(df)
+                        success_files.append(filename)
+                    else:
+                        failed_files.append(f"{filename}: {message}")
+                        
+                except Exception as e:
+                    failed_files.append(f"{filename}: {str(e)}")
+            
+            progress_dialog.setValue(len(files))
+            progress_dialog.close()
+            
+            if all_dhi_data:
+                # 初始化监测计算器
+                try:
+                    from mastitis_monitoring import MastitisMonitoringCalculator
+                    
+                    if not hasattr(self, 'mastitis_monitoring_calculator'):
+                        self.mastitis_monitoring_calculator = MastitisMonitoringCalculator()
+                    
+                    # 加载DHI数据
+                    load_result = self.mastitis_monitoring_calculator.load_dhi_data(all_dhi_data)
+                    
+                    if load_result['success']:
+                        # 更新状态显示
+                        status_text = f"已上传 {len(success_files)} 个DHI文件\n"
+                        status_text += f"数据覆盖: {load_result['month_count']} 个月份\n"
+                        status_text += f"数据范围: {load_result['date_range']['start']} 至 {load_result['date_range']['end']}"
+                        self.dhi_files_label.setText(status_text)
+                        self.dhi_files_label.setStyleSheet("color: #27ae60; font-size: 10px; padding: 5px;")
+                        
+                        # 更新分析按钮状态
+                        self.check_monitoring_analysis_ready()
+                        
+                        QMessageBox.information(
+                            self, 
+                            "上传成功", 
+                            f"DHI数据上传成功！\n\n"
+                            f"成功处理: {len(success_files)} 个文件\n"
+                            f"数据月份: {load_result['month_count']} 个月\n"
+                            f"时间范围: {load_result['date_range']['start']} - {load_result['date_range']['end']}"
+                        )
+                        
+                    else:
+                        QMessageBox.warning(self, "加载失败", f"DHI数据加载失败: {load_result.get('error', '未知错误')}")
+                        
+                except ImportError:
+                    QMessageBox.critical(self, "模块缺失", "缺少隐形乳房炎监测模块，请检查安装。")
+                except Exception as e:
+                    QMessageBox.critical(self, "处理失败", f"DHI数据处理失败: {str(e)}")
+                    
+            else:
+                error_msg = "没有成功处理的DHI文件。\n\n失败原因:\n" + "\n".join(failed_files[:5])
+                if len(failed_files) > 5:
+                    error_msg += f"\n... 还有 {len(failed_files) - 5} 个文件失败"
+                QMessageBox.warning(self, "处理失败", error_msg)
+                
+        except Exception as e:
+            QMessageBox.critical(self, "上传失败", f"DHI文件上传失败: {str(e)}")
+    
+    def upload_cattle_info_for_monitoring(self):
+        """为隐形乳房炎监测上传牛群基础信息"""
+        system_type_map = {
+            "伊起牛": "yiqiniu",
+            "慧牧云": "huimuyun", 
+            "其他": "custom"
+        }
+        
+        system_type = system_type_map.get(self.monitoring_system_combo.currentText(), "custom")
+        
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择牛群基础信息文件",
+            "",
+            "Excel文件 (*.xlsx *.xls)"
+        )
+        
+        if not file_path:
+            return
+        
+        try:
+            # 处理牛群基础信息文件
+            from data_processor import DataProcessor
+            processor = DataProcessor()
+            
+            if system_type == "custom":
+                # 自定义系统：尝试直接读取并识别字段
+                try:
+                    cattle_df = pd.read_excel(file_path)
+                    
+                    # 灵活匹配耳号字段
+                    ear_tag_field = None
+                    for field in ['耳号', 'ear_tag', '牛号', 'cow_id']:
+                        if field in cattle_df.columns:
+                            ear_tag_field = field
+                            break
+                    
+                    # 灵活匹配在胎天数字段
+                    pregnancy_field = None
+                    for field in ['在胎天数', '怀孕天数', 'gestation_days', 'pregnancy_days']:
+                        if field in cattle_df.columns:
+                            pregnancy_field = field
+                            break
+                    
+                    if not ear_tag_field or not pregnancy_field:
+                        missing_fields = []
+                        if not ear_tag_field:
+                            missing_fields.append('耳号（或ear_tag/牛号）')
+                        if not pregnancy_field:
+                            missing_fields.append('在胎天数（或怀孕天数/gestation_days）')
+                        
+                        QMessageBox.warning(
+                            self,
+                            "字段缺失",
+                            f"牛群基础信息文件缺少必要字段：\n{', '.join(missing_fields)}\n\n"
+                            f"当前文件包含字段：\n{', '.join(cattle_df.columns[:10])}..."
+                        )
+                        return
+                    
+                    # 标准化数据
+                    result_df = pd.DataFrame()
+                    result_df['ear_tag'] = cattle_df[ear_tag_field].astype(str).str.lstrip('0').replace('', '0')
+                    result_df['gestation_days'] = pd.to_numeric(cattle_df[pregnancy_field], errors='coerce')
+                    
+                    # 添加其他可用字段
+                    optional_fields = ['胎次', '泌乳天数', '繁育状态', '最近产犊日期']
+                    for field in optional_fields:
+                        if field in cattle_df.columns:
+                            if field == '胎次':
+                                result_df['parity'] = pd.to_numeric(cattle_df[field], errors='coerce')
+                            elif field == '泌乳天数':
+                                result_df['lactation_days'] = pd.to_numeric(cattle_df[field], errors='coerce')
+                            elif field == '繁育状态':
+                                result_df['breeding_status'] = cattle_df[field].astype(str)
+                            elif field == '最近产犊日期':
+                                result_df['last_calving_date'] = pd.to_datetime(cattle_df[field], errors='coerce')
+                    
+                    # 清理数据
+                    result_df = result_df.dropna(subset=['ear_tag'])
+                    result_df = result_df[result_df['ear_tag'] != 'nan']
+                    
+                    processed_data = {'cattle_info': result_df}
+                    success = True
+                    message = f"成功处理{len(result_df)}条牛群基础信息"
+                    
+                except Exception as e:
+                    QMessageBox.critical(
+                        self,
+                        "文件处理失败",
+                        f"无法处理自定义格式的牛群基础信息文件：\n{str(e)}\n\n"
+                        "请确保文件包含'耳号'和'在胎天数'字段（或相应的英文字段名）"
+                    )
+                    return
+            else:
+                # 使用慢性乳房炎筛查的文件处理方法
+                success, message, processed_data = processor.process_mastitis_system_files(
+                    system_type, 
+                    {'cattle_info': file_path}
+                )
+            
+            if success and 'cattle_info' in processed_data:
+                cattle_df = processed_data['cattle_info']
+                
+                # 初始化监测计算器（如果还没有）
+                try:
+                    from mastitis_monitoring import MastitisMonitoringCalculator
+                    
+                    if not hasattr(self, 'mastitis_monitoring_calculator'):
+                        self.mastitis_monitoring_calculator = MastitisMonitoringCalculator()
+                    
+                    # 加载牛群基础信息
+                    load_result = self.mastitis_monitoring_calculator.load_cattle_basic_info(cattle_df, system_type)
+                    
+                    if load_result['success']:
+                        # 同时保存到主窗口，确保其他模块也能使用
+                        self.cattle_basic_info = cattle_df
+                        self.current_system = system_type
+                        
+                        # 更新状态显示
+                        status_text = f"✅ 已上传牛群基础信息\n"
+                        status_text += f"📊 系统类型: {self.monitoring_system_combo.currentText()}\n"
+                        status_text += f"🐄 牛只数量: {load_result['cattle_count']} 头\n"
+                        if load_result.get('pregnancy_field'):
+                            status_text += f"🤰 在胎天数字段: {load_result['pregnancy_field']}\n"
+                        
+                        # 统计在胎天数>180天的牛只
+                        pregnancy_field = load_result.get('pregnancy_field')
+                        if pregnancy_field and pregnancy_field in cattle_df.columns:
+                            pregnancy_data = cattle_df[pregnancy_field].dropna()
+                            if len(pregnancy_data) > 0:
+                                over_180_count = (pregnancy_data > 180).sum()
+                                status_text += f"🎯 干奶前牛只(>180天): {over_180_count} 头"
+                                
+                        self.cattle_info_label.setText(status_text)
+                        self.cattle_info_label.setStyleSheet("color: #27ae60; font-size: 10px; padding: 5px; background-color: #f8f9fa; border: 1px solid #27ae60; border-radius: 3px;")
+                        
+                        # 更新分析按钮状态
+                        self.check_monitoring_analysis_ready()
+                        
+                        QMessageBox.information(
+                            self,
+                            "上传成功",
+                            f"🎉 牛群基础信息上传成功！\n\n"
+                            f"📊 系统类型: {self.monitoring_system_combo.currentText()}\n"
+                            f"🐄 数据量: {load_result['cattle_count']} 头牛\n"
+                            f"🤰 在胎天数字段: {load_result.get('pregnancy_field', '未识别')}\n"
+                            f"💡 现在可以进行隐形乳房炎监测分析，将包含干奶前流行率计算"
+                        )
+                        
+                    else:
+                        QMessageBox.warning(self, "加载失败", f"牛群基础信息加载失败: {load_result.get('error', '未知错误')}")
+                        
+                except ImportError:
+                    QMessageBox.critical(self, "模块缺失", "缺少隐形乳房炎监测模块，请检查安装。")
+                except Exception as e:
+                    QMessageBox.critical(self, "处理失败", f"牛群基础信息处理失败: {str(e)}")
+                    
+            else:
+                QMessageBox.warning(self, "处理失败", f"牛群基础信息处理失败: {message}")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "上传失败", f"牛群基础信息上传失败: {str(e)}")
+    
+    def check_monitoring_analysis_ready(self):
+        """检查隐形乳房炎监测分析是否准备就绪"""
+        if hasattr(self, 'mastitis_monitoring_calculator') and self.mastitis_monitoring_calculator:
+            # 检查是否有DHI数据
+            has_dhi_data = hasattr(self.mastitis_monitoring_calculator, 'monthly_data') and \
+                          self.mastitis_monitoring_calculator.monthly_data
+            
+            # 启用分析按钮
+            if has_dhi_data:
+                self.analyze_monitoring_btn.setEnabled(True)
+                logger.info("隐形乳房炎监测分析已准备就绪")
+            else:
+                self.analyze_monitoring_btn.setEnabled(False)
+        else:
+            self.analyze_monitoring_btn.setEnabled(False)
 
 
 class DHIDesktopApp:

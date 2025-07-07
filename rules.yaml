@@ -71,8 +71,8 @@ field_map:
   # 添加其他性状字段映射
   体细胞数(万/ml): somatic_cell_count
   体细胞数: somatic_cell_count
-  脂肪率(%): fat_pct
-  脂肪率: fat_pct
+  乳脂率(%): fat_pct
+  乳脂率: fat_pct
   乳糖率(%): lactose_pct
   乳糖率: lactose_pct
   固形物(%): solids_pct
@@ -156,7 +156,7 @@ filters:
 optional_filters:
   fat_pct:
     field: fat_pct
-    chinese_name: "脂肪率(%)"
+    chinese_name: "乳脂率(%)"
     min: 2.0
     max: 6.0
     min_match_months: 3

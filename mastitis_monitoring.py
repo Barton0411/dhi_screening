@@ -331,20 +331,34 @@ class MastitisMonitoringCalculator:
     
     def _get_pregnancy_field(self, system_type: str) -> Optional[str]:
         """根据系统类型获取在胎天数字段名"""
+        if self.cattle_basic_info is None:
+            return None
+        
+        # 获取实际可用的字段
+        available_fields = list(self.cattle_basic_info.columns)
+        
         if system_type == 'yiqiniu':
-            # 伊起牛系统优先查找中文字段名
-            possible_fields = ['在胎天数', 'gestation_days', '怀孕天数', 'pregnancy_days']
+            # 伊起牛系统：数据处理后已标准化为gestation_days，优先查找标准字段
+            possible_fields = ['gestation_days', '在胎天数', '怀孕天数', 'pregnancy_days']
         elif system_type == 'huimuyun':
-            # 慧牧云系统优先查找对应字段
-            possible_fields = ['pregnancy_days', '怀孕天数', '在胎天数', 'gestation_days']
+            # 慧牧云系统：优先查找对应字段
+            possible_fields = ['gestation_days', 'pregnancy_days', '怀孕天数', '在胎天数']
         else:
             # 其他系统查找所有可能的字段名
             possible_fields = ['gestation_days', 'pregnancy_days', '在胎天数', '怀孕天数']
         
-        if self.cattle_basic_info is not None:
-            for field in possible_fields:
-                if field in self.cattle_basic_info.columns:
-                    return field
+        # 查找匹配的字段
+        for field in possible_fields:
+            if field in available_fields:
+                return field
+        
+        # 如果没有完全匹配，尝试模糊匹配
+        pregnancy_related_fields = [f for f in available_fields if '天数' in f or 'days' in f.lower()]
+        gestation_related_fields = [f for f in pregnancy_related_fields if '胎' in f or 'gest' in f.lower() or 'preg' in f.lower()]
+        
+        if gestation_related_fields:
+            return gestation_related_fields[0]
+        
         return None
     
     def _check_month_continuity(self, months: List[str]) -> Dict[str, Any]:
@@ -729,9 +743,16 @@ class MastitisMonitoringCalculator:
             debug_msg += f"\n体细胞阈值: {self.scc_threshold}万/ml"
             print(debug_msg)
             
-            # 同时写入调试文件
-            with open('/Users/Shared/Files From d.localized/projects/protein_screening/predry_debug.log', 'a', encoding='utf-8') as f:
-                f.write(debug_msg + '\n')
+            # 写入调试文件（跨平台兼容）
+            try:
+                import os
+                import tempfile
+                debug_file = os.path.join(tempfile.gettempdir(), 'predry_debug.log')
+                with open(debug_file, 'a', encoding='utf-8') as f:
+                    f.write(debug_msg + '\n')
+            except Exception:
+                # 如果无法写入调试文件，忽略错误继续执行
+                pass
             
             # 检查基础数据
             if self.cattle_basic_info is None:
@@ -746,14 +767,40 @@ class MastitisMonitoringCalculator:
                     'diagnosis': '缺少牛群基础信息'
                 }
             
+            # Windows环境调试：输出更多系统信息
+            try:
+                import platform
+                import sys
+                print(f"🔍 系统环境调试:")
+                print(f"   操作系统: {platform.system()} {platform.release()}")
+                print(f"   Python版本: {sys.version}")
+                print(f"   是否打包环境: {getattr(sys, 'frozen', False)}")
+                print(f"   执行路径: {sys.executable}")
+            except Exception as debug_e:
+                print(f"   系统信息获取失败: {debug_e}")
+            
             print(f"✅ 牛群基础信息已加载: {len(self.cattle_basic_info)}头牛")
             
-            # 获取在胎天数字段
-            pregnancy_field = self._get_pregnancy_field(self.cattle_system_type or 'other')
+            # 获取在胎天数字段 - 增强调试
             available_fields = list(self.cattle_basic_info.columns)
-            print(f"🔍 系统类型: {self.cattle_system_type}")
-            print(f"🔍 获取到的在胎天数字段: {pregnancy_field}")
-            print(f"🔍 牛群信息可用字段: {available_fields[:10]}...")  # 只显示前10个字段
+            pregnancy_field = self._get_pregnancy_field(self.cattle_system_type or 'other')
+            
+            print(f"🔍 详细字段调试:")
+            print(f"   系统类型: {self.cattle_system_type}")
+            print(f"   牛群信息总字段数: {len(available_fields)}")
+            print(f"   所有字段: {available_fields}")
+            print(f"   包含'天数'的字段: {[f for f in available_fields if '天数' in f]}")
+            print(f"   包含'days'的字段: {[f for f in available_fields if 'days' in f.lower()]}")
+            print(f"   获取到的在胎天数字段: {pregnancy_field}")
+            
+            # 检查数据类型和数据样本
+            if pregnancy_field and pregnancy_field in self.cattle_basic_info.columns:
+                preg_data = self.cattle_basic_info[pregnancy_field]
+                print(f"   在胎天数字段数据类型: {preg_data.dtype}")
+                print(f"   在胎天数非空值数量: {preg_data.count()}")
+                print(f"   在胎天数样本值: {preg_data.dropna().head().tolist()}")
+            else:
+                print(f"   ❌ 在胎天数字段不存在或为空")
             
             if not pregnancy_field or pregnancy_field not in self.cattle_basic_info.columns:
                 pregnancy_related = [f for f in available_fields if '天数' in f or 'days' in f.lower()]

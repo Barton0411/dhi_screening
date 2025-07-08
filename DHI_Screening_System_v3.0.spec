@@ -18,7 +18,6 @@ a = Analysis(
         ('whg3r-qi1nv-001.ico', '.'),
         ('README.md', '.'),
         ('DHI_精准筛查助手-操作说明.md', '.'),
-        ('使用指南.md', '.'),
         ('需求说明.md', '.')
     ],
     hiddenimports=[

@@ -284,8 +284,21 @@ class MastitisMonitoringCalculator:
             
             # 计算干奶前流行率（只计算最新月份）
             latest_month = months[-1]
+            print(f"\n🔍 准备计算干奶前流行率 - 最新月份: {latest_month}")
+            print(f"   牛群基础信息状态: {self.cattle_basic_info is not None}")
+            print(f"   牛群信息数量: {len(self.cattle_basic_info) if self.cattle_basic_info is not None else 0}")
+            
             if self.cattle_basic_info is not None:
+                print(f"   ✅ 开始计算干奶前流行率...")
                 results['indicators'][latest_month]['pre_dry_prevalence'] = self._calculate_pre_dry_prevalence(latest_month)
+            else:
+                print(f"   ❌ 跳过干奶前流行率计算：未加载牛群基础信息")
+                # 为了调试，我们仍然添加一个空的结果
+                results['indicators'][latest_month]['pre_dry_prevalence'] = {
+                    'value': None,
+                    'formula': '📋 无法计算干奶前流行率 - 未加载牛群基础信息',
+                    'diagnosis': '未加载牛群基础信息'
+                }
             
             self.results = results
             return results
@@ -712,8 +725,17 @@ class MastitisMonitoringCalculator:
     def _calculate_pre_dry_prevalence(self, month: str) -> Dict[str, Any]:
         """计算干奶前流行率"""
         try:
+            debug_msg = f"\n🔍 开始计算干奶前流行率 - 月份: {month}"
+            debug_msg += f"\n体细胞阈值: {self.scc_threshold}万/ml"
+            print(debug_msg)
+            
+            # 同时写入调试文件
+            with open('/Users/Shared/Files From d.localized/projects/protein_screening/predry_debug.log', 'a', encoding='utf-8') as f:
+                f.write(debug_msg + '\n')
+            
             # 检查基础数据
             if self.cattle_basic_info is None:
+                print("❌ 检查失败: 未上传牛群基础信息")
                 return {
                     'value': None,
                     'formula': '📋 无法计算干奶前流行率 - 未上传牛群基础信息<br/>💡 解决方案：请在"慢性乳房炎筛查"功能中上传包含在胎天数信息的牛群基础信息文件',
@@ -724,13 +746,19 @@ class MastitisMonitoringCalculator:
                     'diagnosis': '缺少牛群基础信息'
                 }
             
+            print(f"✅ 牛群基础信息已加载: {len(self.cattle_basic_info)}头牛")
+            
             # 获取在胎天数字段
             pregnancy_field = self._get_pregnancy_field(self.cattle_system_type or 'other')
             available_fields = list(self.cattle_basic_info.columns)
+            print(f"🔍 系统类型: {self.cattle_system_type}")
+            print(f"🔍 获取到的在胎天数字段: {pregnancy_field}")
+            print(f"🔍 牛群信息可用字段: {available_fields[:10]}...")  # 只显示前10个字段
             
             if not pregnancy_field or pregnancy_field not in self.cattle_basic_info.columns:
                 pregnancy_related = [f for f in available_fields if '天数' in f or 'days' in f.lower()]
                 field_info = f"可用字段：{pregnancy_related}" if pregnancy_related else "未找到相关字段"
+                print(f"❌ 在胎天数字段检查失败: {field_info}")
                 
                 return {
                     'value': None,
@@ -742,15 +770,28 @@ class MastitisMonitoringCalculator:
                     'diagnosis': '缺少在胎天数字段'
                 }
             
+            print(f"✅ 在胎天数字段验证通过: {pregnancy_field}")
+            
             # 获取当月DHI数据
             dhi_df = self.monthly_data[month]
+            print(f"\n📊 DHI数据信息:")
+            print(f"   当月({month})DHI数据: {len(dhi_df)}头牛")
+            if len(dhi_df) > 0:
+                print(f"   管理号示例: {dhi_df['management_id'].head().tolist()}")
+                print(f"   体细胞数示例: {dhi_df['somatic_cell_count'].head().tolist()}")
             
             # 匹配管理号与耳号
+            print(f"\n🔗 开始匹配管理号与耳号...")
             matched_data = self._match_management_id_with_ear_tag(dhi_df)
             match_rate = (len(matched_data) / len(dhi_df)) * 100 if len(dhi_df) > 0 else 0
+            print(f"   匹配结果: {len(matched_data)}头 / {len(dhi_df)}头 = {match_rate:.1f}%")
             
             # 详细的匹配诊断
             if len(matched_data) == 0:
+                print(f"❌ 匹配失败: 无法匹配任何牛只")
+                print(f"   DHI管理号标准化示例: {dhi_df['management_id_standardized'].head().tolist()}")
+                if hasattr(self.cattle_basic_info, 'ear_tag_standardized'):
+                    print(f"   牛群耳号标准化示例: {self.cattle_basic_info['ear_tag_standardized'].head().tolist()}")
                 return {
                     'value': None,
                     'formula': f'📋 无法计算干奶前流行率 - DHI数据与牛群基础信息无法匹配<br/>📊 DHI数据：{len(dhi_df)}头牛<br/>🐄 牛群基础信息：{len(self.cattle_basic_info)}头牛<br/>🔗 匹配成功：0头 (0.0%)<br/>💡 可能原因：<br/>　• DHI数据与牛群信息来自不同时间点<br/>　• 管理号与耳号编码方式不同<br/>　• 数据来源不是同一个牧场',
@@ -761,16 +802,22 @@ class MastitisMonitoringCalculator:
                     'diagnosis': '数据无法匹配'
                 }
             
+            print(f"✅ 匹配成功: {len(matched_data)}头牛")
+            
             # 低匹配率警告
             low_match_warning = ""
             if match_rate < 50:
                 low_match_warning = f"<br/>⚠️ 注意：数据匹配率较低 ({match_rate:.1f}%)，结果可能不完整"
             
             # 检查匹配数据中的在胎天数
+            print(f"\n🤰 检查在胎天数数据...")
             pregnancy_data_count = matched_data[pregnancy_field].count()
             pregnancy_valid_data = matched_data[pregnancy_field].dropna()
+            print(f"   匹配牛只中有在胎天数数据的: {pregnancy_data_count}头")
             
             if pregnancy_data_count == 0:
+                print(f"❌ 在胎天数检查失败: 匹配成功的牛只中无在胎天数数据")
+                print(f"   匹配数据列名: {list(matched_data.columns)}")
                 return {
                     'value': None,
                     'formula': f'📋 无法计算干奶前流行率 - 匹配成功的牛只中无在胎天数数据<br/>📊 DHI数据：{len(dhi_df)}头牛<br/>🔗 匹配成功：{len(matched_data)}头 ({match_rate:.1f}%)<br/>📉 有在胎天数数据：0头<br/>💡 可能原因：<br/>　• 牛群基础信息导出时间与DHI测试时间不同步<br/>　• 匹配成功的牛只当时处于空怀状态{low_match_warning}',
@@ -781,19 +828,29 @@ class MastitisMonitoringCalculator:
                     'diagnosis': '匹配牛只无在胎天数数据'
                 }
             
+            print(f"✅ 在胎天数数据检查通过: {pregnancy_data_count}头牛有数据")
+            
             # 筛选在胎天数>180天的牛只
+            print(f"\n🎯 筛选干奶前牛只(在胎天数>180天)...")
+            print(f"   在胎天数有效数据范围: {pregnancy_valid_data.min():.0f}-{pregnancy_valid_data.max():.0f}天")
+            print(f"   平均在胎天数: {pregnancy_valid_data.mean():.1f}天")
+            
             pregnancy_condition = matched_data[pregnancy_field] > 180
             pre_dry_cattle = matched_data[pregnancy_condition]
+            over_180_count = (pregnancy_valid_data > 180).sum()
+            print(f"   在胎天数>180天的牛只: {over_180_count}头")
+            print(f"   筛选出的干奶前牛只: {len(pre_dry_cattle)}头")
             
             # 提供在胎天数的统计信息
             if len(pregnancy_valid_data) > 0:
                 preg_stats = f"在胎天数范围：{pregnancy_valid_data.min():.0f}-{pregnancy_valid_data.max():.0f}天，平均{pregnancy_valid_data.mean():.0f}天"
-                over_180_count = (pregnancy_valid_data > 180).sum()
                 preg_stats += f"，>180天：{over_180_count}头"
             else:
                 preg_stats = "无有效在胎天数数据"
             
             if len(pre_dry_cattle) == 0:
+                print(f"❌ 干奶前牛只筛选失败: 无在胎天数>180天的牛只")
+                print(f"   统计信息: {preg_stats}")
                 return {
                     'value': None,
                     'formula': f'📋 无法计算干奶前流行率 - 无在胎天数>180天的牛只<br/>📊 DHI数据：{len(dhi_df)}头牛<br/>🔗 匹配成功：{len(matched_data)}头 ({match_rate:.1f}%)<br/>📊 有在胎天数数据：{pregnancy_data_count}头<br/>📈 {preg_stats}<br/>🎯 符合干奶前条件（>180天）：0头{low_match_warning}',
@@ -805,11 +862,20 @@ class MastitisMonitoringCalculator:
                     'diagnosis': '无符合干奶前条件的牛只'
                 }
             
+            print(f"✅ 干奶前牛只筛选成功: {len(pre_dry_cattle)}头")
+            
             # 成功计算干奶前流行率
+            print(f"\n📈 计算干奶前流行率...")
             high_scc_count = (pre_dry_cattle['somatic_cell_count'] > self.scc_threshold).sum()
             total_pre_dry = len(pre_dry_cattle)
             
+            print(f"   干奶前牛只总数: {total_pre_dry}头")
+            print(f"   体细胞>{self.scc_threshold}万/ml的牛只: {high_scc_count}头")
+            print(f"   干奶前牛只体细胞数详情: {pre_dry_cattle['somatic_cell_count'].tolist()}")
+            
             pre_dry_prevalence = (high_scc_count / total_pre_dry) * 100
+            print(f"   计算公式: ({high_scc_count} ÷ {total_pre_dry}) × 100% = {pre_dry_prevalence:.1f}%")
+            print(f"✅ 干奶前流行率计算成功: {pre_dry_prevalence:.1f}%")
             
             formula = f'🎯 干奶前流行率计算成功<br/>📊 DHI数据：{len(dhi_df)}头牛<br/>🔗 匹配成功：{len(matched_data)}头 ({match_rate:.1f}%)<br/>📊 有在胎天数数据：{pregnancy_data_count}头<br/>🐄 干奶前牛只（>180天）：{total_pre_dry}头<br/>🔬 体细胞>{self.scc_threshold}万/ml：{high_scc_count}头<br/>📈 干奶前流行率：{pre_dry_prevalence:.1f}%{low_match_warning}'
             
@@ -847,9 +913,23 @@ class MastitisMonitoringCalculator:
         try:
             # 将牛群基础信息的耳号标准化
             if self.cattle_basic_info is None:
+                print("   ❌ 牛群基础信息为空")
                 return pd.DataFrame()
             
             cattle_info = self.cattle_basic_info.copy()
+            print(f"   🔍 开始匹配: DHI数据{len(dhi_df)}头，牛群信息{len(cattle_info)}头")
+            
+            # 检查标准化字段是否存在
+            if 'ear_tag_standardized' not in cattle_info.columns:
+                print("   ❌ 牛群信息缺少ear_tag_standardized字段")
+                return pd.DataFrame()
+                
+            if 'management_id_standardized' not in dhi_df.columns:
+                print("   ❌ DHI数据缺少management_id_standardized字段")
+                return pd.DataFrame()
+            
+            print(f"   📋 DHI管理号标准化示例: {dhi_df['management_id_standardized'].head().tolist()}")
+            print(f"   📋 牛群耳号标准化示例: {cattle_info['ear_tag_standardized'].head().tolist()}")
             
             # 基于标准化后的ID进行匹配
             matched_data = dhi_df.merge(
@@ -859,11 +939,16 @@ class MastitisMonitoringCalculator:
                 how='inner'
             )
             
+            print(f"   🔗 匹配结果: {len(matched_data)}头牛匹配成功")
+            if len(matched_data) > 0:
+                print(f"   📋 匹配成功的ID示例: {matched_data['management_id_standardized'].head().tolist()}")
+            
             logger.info(f"管理号匹配结果: DHI数据{len(dhi_df)}头，成功匹配{len(matched_data)}头")
             
             return matched_data
             
         except Exception as e:
+            print(f"   ❌ 匹配过程异常: {e}")
             logger.error(f"管理号与耳号匹配失败: {e}")
             return pd.DataFrame()
     

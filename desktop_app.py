@@ -3107,7 +3107,7 @@ class MainWindow(QMainWindow):
         self.export_monitoring_btn.setMaximumWidth(120)
         
         # 状态显示
-        self.monitoring_status_label = QLabel("请先在慢性乳房炎筛查中上传牛群基础信息，然后上传DHI数据")
+        self.monitoring_status_label = QLabel("请先上传牛群基础信息，然后上传DHI数据进行分析")
         self.monitoring_status_label.setStyleSheet("""
             QLabel {
                 color: black;
@@ -3120,14 +3120,50 @@ class MainWindow(QMainWindow):
             }
         """)
         
+        # DHI数据上传
+        dhi_data_btn = QPushButton("📊 上传DHI数据")
+        dhi_data_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #28a745;
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #218838;
+            }
+        """)
+        dhi_data_btn.clicked.connect(self.upload_dhi_for_monitoring)
+        dhi_data_btn.setMaximumWidth(120)
+        
+        # 数据状态显示
+        self.monitoring_data_status = QLabel()
+        self.monitoring_data_status.setStyleSheet("""
+            QLabel {
+                color: black;
+                font-size: 11px;
+                padding: 8px;
+                background-color: #f8f9fa;
+                border-radius: 4px;
+                border-left: 4px solid #17a2b8;
+                font-weight: bold;
+            }
+        """)
+        self.update_monitoring_data_status()
+        
         # 添加到配置布局
         config_layout.addWidget(threshold_label)
         config_layout.addWidget(self.monitoring_scc_threshold)
+        config_layout.addWidget(dhi_data_btn)
         config_layout.addWidget(self.start_monitoring_btn)
         config_layout.addWidget(self.export_monitoring_btn)
         config_layout.addStretch()
         
         config_card.layout().addLayout(config_layout)
+        config_card.layout().addWidget(self.monitoring_data_status)
         config_card.layout().addWidget(self.monitoring_status_label)
         tab_layout.addWidget(config_card)
         
@@ -3139,6 +3175,30 @@ class MainWindow(QMainWindow):
         self.mastitis_monitoring_results = None
         
         self.function_tabs.addTab(tab_widget, "👁️ 隐形乳房炎监测")
+    
+    def update_monitoring_data_status(self):
+        """更新隐形乳房炎监测的数据状态显示"""
+        status_lines = []
+        
+        # 检查牛群基础信息
+        if hasattr(self, 'cattle_basic_info') and self.cattle_basic_info is not None:
+            system_name = getattr(self, 'current_system', 'unknown')
+            system_display = {'yiqiniu': '伊起牛', 'huimuyun': '慧牧云', 'custom': '其他'}.get(system_name, system_name)
+            status_lines.append(f"✅ 牛群基础信息: {len(self.cattle_basic_info)}头牛 ({system_display}系统)")
+        else:
+            status_lines.append("❌ 牛群基础信息: 未上传 (请先到'慢性乳房炎筛查'中上传)")
+        
+        # 检查DHI数据
+        if hasattr(self, 'mastitis_monitoring_calculator') and self.mastitis_monitoring_calculator:
+            if hasattr(self.mastitis_monitoring_calculator, 'monthly_data') and self.mastitis_monitoring_calculator.monthly_data:
+                month_count = len(self.mastitis_monitoring_calculator.monthly_data)
+                status_lines.append(f"✅ DHI数据: {month_count}个月份")
+            else:
+                status_lines.append("❌ DHI数据: 未上传")
+        else:
+            status_lines.append("❌ DHI数据: 未上传")
+        
+        self.monitoring_data_status.setText("\n".join(status_lines))
     
     def get_mastitis_monitoring_formula_html(self):
         """获取隐形乳房炎监测公式说明HTML"""
@@ -6452,13 +6512,23 @@ class MainWindow(QMainWindow):
             # 更新进度 - 文件信息读取完成
             self.mastitis_progress.setValue(50)
             
-            # 如果是牛群基础信息表，提取繁殖状态并更新选项
+            # 如果是牛群基础信息表，立即处理并保存数据
             if file_key == 'cattle_info':
-                self.progress_status_label.setText("正在提取繁育状态...")
+                self.progress_status_label.setText("正在处理牛群基础信息...")
                 self.mastitis_progress.setValue(60)
-                self.extract_and_update_breeding_status(file_path)
-                self.mastitis_progress.setValue(100)
-                self.progress_status_label.setText("繁育状态提取完成")
+                
+                # 立即处理牛群基础信息表
+                success = self.process_and_save_cattle_basic_info(file_path)
+                
+                if success:
+                    self.progress_status_label.setText("正在提取繁育状态...")
+                    self.mastitis_progress.setValue(80)
+                    self.extract_and_update_breeding_status(file_path)
+                    self.mastitis_progress.setValue(100)
+                    self.progress_status_label.setText("牛群基础信息处理完成")
+                else:
+                    self.mastitis_progress.setValue(100)
+                    self.progress_status_label.setText("牛群基础信息处理失败")
             else:
                 self.mastitis_progress.setValue(100)
                 self.progress_status_label.setText("文件处理完成")
@@ -6549,6 +6619,88 @@ class MainWindow(QMainWindow):
 """
             self.file_info_widget.append(error_text)
     
+    def process_and_save_cattle_basic_info(self, file_path: str) -> bool:
+        """立即处理并保存牛群基础信息到主窗口"""
+        try:
+            print(f"\n🔄 [立即处理] 开始处理牛群基础信息表...")
+            print(f"   文件路径: {file_path}")
+            print(f"   当前系统: {self.current_mastitis_system}")
+            print(f"   文件是否存在: {os.path.exists(file_path)}")
+            
+            # 检查当前主窗口状态
+            print(f"🔍 [处理前] 主窗口状态检查...")
+            print(f"   hasattr(self, 'cattle_basic_info'): {hasattr(self, 'cattle_basic_info')}")
+            print(f"   hasattr(self, 'current_system'): {hasattr(self, 'current_system')}")
+            print(f"   hasattr(self, 'data_processor'): {hasattr(self, 'data_processor')}")
+            
+            # 直接处理牛群基础信息文件（不依赖其他文件）
+            print(f"   🔄 直接处理牛群基础信息文件...")
+            
+            if self.current_mastitis_system == 'yiqiniu':
+                # 伊起牛系统：直接调用牛群基础信息处理方法
+                success, message, cattle_df = self.data_processor._process_yiqiniu_cattle_info(file_path)
+                processed_data = {'cattle_info': cattle_df} if success else {}
+                
+            elif self.current_mastitis_system == 'huimuyun':
+                # 慧牧云系统：直接调用牛群基础信息处理方法
+                success, message, cattle_df = self.data_processor._process_huimuyun_cattle_info(file_path)
+                processed_data = {'cattle_info': cattle_df} if success else {}
+                
+            elif self.current_mastitis_system == 'custom':
+                # 自定义系统需要字段映射
+                widget = self.mastitis_file_uploads.get('cattle_info')
+                if widget and hasattr(widget, 'mapping_inputs'):
+                    field_mappings = {}
+                    for field, input_widget in widget.mapping_inputs.items():
+                        column_name = input_widget.text().strip()
+                        if column_name:
+                            field_mappings[field] = column_name
+                    
+                    success, message, cattle_df = self.data_processor._process_custom_cattle_info(
+                        file_path, field_mappings
+                    )
+                    processed_data = {'cattle_info': cattle_df} if success else {}
+                else:
+                    print(f"   ❌ 自定义系统缺少字段映射配置")
+                    return False
+            else:
+                print(f"   ❌ 未知系统类型: {self.current_mastitis_system}")
+                return False
+            
+            if success and 'cattle_info' in processed_data:
+                # 保存牛群基础信息到主窗口
+                self.cattle_basic_info = processed_data['cattle_info']
+                self.current_system = self.current_mastitis_system
+                
+                print(f"✅ [立即处理] 牛群基础信息已保存到主窗口: {len(self.cattle_basic_info)}头牛")
+                print(f"✅ [立即处理] 系统类型已保存: {self.current_system}")
+                
+                # 更新隐形乳房炎监测的数据状态显示
+                if hasattr(self, 'update_monitoring_data_status'):
+                    self.update_monitoring_data_status()
+                
+                # 在处理过程面板中显示成功信息
+                self.process_log_widget.append(f"""
+🎉 牛群基础信息立即处理成功
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📁 文件: {os.path.basename(file_path)}
+⚙️ 系统: {self.current_mastitis_system}
+🐄 牛只数量: {len(self.cattle_basic_info)}头
+✅ 状态: 已自动保存，可用于隐形乳房炎监测
+
+💡 现在您可以到"隐形乳房炎监测"功能中上传DHI数据进行分析了！
+""")
+                
+                return True
+            else:
+                print(f"   ❌ 牛群基础信息处理失败: {message}")
+                return False
+                
+        except Exception as e:
+            print(f"   ❌ 处理牛群基础信息时出错: {str(e)}")
+            return False
+
     def extract_and_update_breeding_status(self, file_path: str):
         """提取牛群基础信息表中的繁殖状态并更新选项"""
         try:
@@ -7080,6 +7232,17 @@ class MainWindow(QMainWindow):
                 return
             
             self.process_log_widget.append(f"✅ 系统文件处理成功: {message}")
+            
+            # 保存牛群基础信息到主窗口，供监测功能使用
+            self.cattle_basic_info = processed_data['cattle_info']
+            self.current_system = self.current_mastitis_system
+            print(f"🔍 牛群基础信息已保存到主窗口: {len(self.cattle_basic_info)}头牛")
+            print(f"🔍 系统类型已保存: {self.current_system}")
+            
+            # 更新隐形乳房炎监测的数据状态显示
+            if hasattr(self, 'update_monitoring_data_status'):
+                self.update_monitoring_data_status()
+            
             self.mastitis_progress.setValue(30)
             self.progress_status_label.setText("步骤 3/8: 计算最近7天奶量...")
             self.mastitis_status_label.setText("正在计算关键指标...")
@@ -7570,7 +7733,43 @@ class MainWindow(QMainWindow):
     def start_mastitis_monitoring(self):
         """启动隐形乳房炎月度监测分析"""
         try:
-            # 检查数据是否可用
+            print(f"\n🔍 [详细调试] 开始隐形乳房炎监测分析...")
+            
+            # 详细检查系统状态
+            print(f"🔍 [详细调试] 检查DHI数据可用性...")
+            print(f"   hasattr(self, 'data_list'): {hasattr(self, 'data_list')}")
+            if hasattr(self, 'data_list'):
+                print(f"   self.data_list is not None: {self.data_list is not None}")
+                if self.data_list:
+                    print(f"   DHI数据文件数量: {len(self.data_list)}")
+                    for i, item in enumerate(self.data_list):
+                        print(f"     文件{i+1}: {item.get('filename', 'Unknown')} - 数据行数: {len(item['data']) if item.get('data') is not None else 0}")
+            
+            print(f"🔍 [详细调试] 检查牛群基础信息...")
+            print(f"   hasattr(self, 'cattle_basic_info'): {hasattr(self, 'cattle_basic_info')}")
+            if hasattr(self, 'cattle_basic_info'):
+                print(f"   self.cattle_basic_info is not None: {self.cattle_basic_info is not None}")
+                if self.cattle_basic_info is not None:
+                    print(f"   牛群基础信息数量: {len(self.cattle_basic_info)}")
+                    print(f"   牛群数据列名: {list(self.cattle_basic_info.columns)}")
+                    print(f"   系统类型: {getattr(self, 'current_system', 'Unknown')}")
+                    # 显示前几头牛的信息
+                    if len(self.cattle_basic_info) > 0:
+                        print(f"   前3头牛示例:")
+                        for i in range(min(3, len(self.cattle_basic_info))):
+                            cow_data = self.cattle_basic_info.iloc[i]
+                            print(f"     牛{i+1}: 耳号={cow_data.get('ear_tag', 'N/A')}, 在胎天数={cow_data.get('gestation_days', 'N/A')}")
+            
+            print(f"🔍 [详细调试] 检查监测计算器...")
+            print(f"   hasattr(self, 'mastitis_monitoring_calculator'): {hasattr(self, 'mastitis_monitoring_calculator')}")
+            if hasattr(self, 'mastitis_monitoring_calculator'):
+                print(f"   计算器对象: {self.mastitis_monitoring_calculator}")
+                if self.mastitis_monitoring_calculator:
+                    print(f"   计算器中是否有牛群数据: {hasattr(self.mastitis_monitoring_calculator, 'cattle_basic_info')}")
+                    if hasattr(self.mastitis_monitoring_calculator, 'cattle_basic_info'):
+                        print(f"   计算器中牛群数据: {self.mastitis_monitoring_calculator.cattle_basic_info is not None}")
+            
+            # 检查DHI数据是否可用
             if not hasattr(self, 'data_list') or not self.data_list:
                 self.show_warning("警告", "请先在'DHI基础筛选'标签页中上传DHI数据")
                 return
@@ -7601,12 +7800,36 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, "错误", f"DHI数据加载失败: {load_result.get('error', '未知错误')}")
                 return
             
-            # 加载牛群基础信息（如果有）
+            # 自动加载慢性乳房炎筛查中的牛群基础信息
+            print(f"\n🔍 检查牛群基础信息...")
+            print(f"   hasattr(self, 'cattle_basic_info'): {hasattr(self, 'cattle_basic_info')}")
+            if hasattr(self, 'cattle_basic_info'):
+                print(f"   self.cattle_basic_info is not None: {self.cattle_basic_info is not None}")
+                if self.cattle_basic_info is not None:
+                    print(f"   牛群基础信息数量: {len(self.cattle_basic_info)}")
+                    print(f"   系统类型: {getattr(self, 'current_system', 'Unknown')}")
+            
             if hasattr(self, 'cattle_basic_info') and self.cattle_basic_info is not None:
+                print(f"   ✅ 发现慢性乳房炎筛查中的牛群数据，自动加载到监测计算器...")
+                print(f"   牛群数据详情: {len(self.cattle_basic_info)}头牛, 系统类型: {getattr(self, 'current_system', 'Unknown')}")
+                print(f"   牛群数据列: {list(self.cattle_basic_info.columns)}")
+                
                 cattle_result = self.mastitis_monitoring_calculator.load_cattle_basic_info(
                     self.cattle_basic_info, self.current_system)
+                    
+                print(f"   加载结果: {cattle_result}")
+                
                 if not cattle_result['success']:
-                    QMessageBox.warning(self, "提示", f"牛群基础信息加载失败: {cattle_result.get('error', '未知错误')}\n将无法计算干奶前流行率")
+                    print(f"   ❌ 牛群基础信息加载失败: {cattle_result.get('error')}")
+                    self.show_warning("提示", f"牛群基础信息加载失败: {cattle_result.get('error', '未知错误')}\n将无法计算干奶前流行率")
+                else:
+                    print(f"   ✅ 牛群基础信息加载成功，可计算干奶前流行率")
+                    print(f"   加载详情: {cattle_result.get('message', '无详情')}")
+                    # 更新状态显示
+                    self.update_monitoring_data_status()
+            else:
+                print(f"   ❌ 跳过牛群基础信息加载：数据不存在")
+                print(f"   💡 提示：如需计算干奶前流行率，请先到'慢性乳房炎筛查'中上传牛群基础信息")
             
             # 执行计算
             self.start_monitoring_btn.setText("计算中...")
@@ -7743,6 +7966,13 @@ class MainWindow(QMainWindow):
                 pdp = month_data.get('pre_dry_prevalence', {})
                 is_latest_month = (row == len(months) - 1)  # 判断是否为最新月份
                 
+                # 调试输出
+                print(f"🔍 干奶前流行率调试 - 月份: {month}")
+                print(f"   是否最新月份: {is_latest_month}")
+                print(f"   干奶前流行率数据: {pdp}")
+                print(f"   数值: {pdp.get('value')}")
+                print(f"   诊断: {pdp.get('diagnosis')}")
+                
                 if is_latest_month and pdp.get('value') is not None:
                     # 最新月份且有数值
                     pdp_value = f"{pdp['value']:.1f}"
@@ -7762,6 +7992,7 @@ class MainWindow(QMainWindow):
                     
                 elif is_latest_month and pdp.get('formula'):
                     # 最新月份但计算失败，显示具体错误
+                    print(f"   💡 干奶前流行率计算失败，显示N/A")
                     pdp_value = "N/A"
                     pdp_item = QTableWidgetItem(pdp_value)
                     
@@ -7782,6 +8013,7 @@ class MainWindow(QMainWindow):
                         pdp_item.setForeground(QColor('black'))  # 黑色字体
                 else:
                     # 非最新月份，显示"-"
+                    print(f"   💡 显示'-'，原因: 非最新月份或无数据")
                     pdp_value = "-"
                     pdp_item = QTableWidgetItem(pdp_value)
                     pdp_item.setToolTip("干奶前流行率只在最新月份计算")
@@ -8112,15 +8344,11 @@ class MainWindow(QMainWindow):
                     load_result = self.mastitis_monitoring_calculator.load_dhi_data(all_dhi_data)
                     
                     if load_result['success']:
-                        # 更新状态显示
-                        status_text = f"已上传 {len(success_files)} 个DHI文件\n"
-                        status_text += f"数据覆盖: {load_result['month_count']} 个月份\n"
-                        status_text += f"数据范围: {load_result['date_range']['start']} 至 {load_result['date_range']['end']}"
-                        self.dhi_files_label.setText(status_text)
-                        self.dhi_files_label.setStyleSheet("color: #27ae60; font-size: 10px; padding: 5px;")
+                        # 更新监测状态显示
+                        self.update_monitoring_data_status()
                         
-                        # 更新分析按钮状态
-                        self.check_monitoring_analysis_ready()
+                        # 更新状态信息
+                        self.monitoring_status_label.setText(f"✅ DHI数据已上传，包含 {load_result['month_count']} 个月份的数据")
                         
                         QMessageBox.information(
                             self, 

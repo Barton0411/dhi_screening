@@ -92,7 +92,6 @@ a = Analysis(
         'unittest'
     ],
     noarchive=False,
-    optimize=2,
 )
 
 # Python包配置

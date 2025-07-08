@@ -65,27 +65,27 @@ def test_range_limits():
     # 测试其他筛选项的创建
     print("🔧 测试其他筛选项的范围限制...")
     
-    # 添加一个脂肪率筛选项来测试，使用窗口的处理器获取配置
+    # 添加一个乳脂率筛选项来测试，使用窗口的处理器获取配置
     fat_filter_config = window.processor.rules.get("optional_filters", {}).get("fat_pct", {})
     
     if fat_filter_config:
         fat_widget = window.create_other_filter_widget('fat_pct', fat_filter_config)
         fat_min_max = fat_widget.range_min.maximum()
         fat_max_max = fat_widget.range_max.maximum()
-        print(f"✅ 脂肪率筛选项最大值: {fat_min_max} / {fat_max_max}")
+        print(f"✅ 乳脂率筛选项最大值: {fat_min_max} / {fat_max_max}")
         
         if fat_min_max >= 999999.99 and fat_max_max >= 999999.99:
             print("✅ 其他筛选项范围控件最大值限制已修复")
         else:
             print("❌ 其他筛选项范围控件最大值限制仍有问题")
     else:
-        print("❌ 脂肪率筛选项配置未找到")
+        print("❌ 乳脂率筛选项配置未找到")
     
     # 验证实际数据值的设置
     print("\n📊 验证实际数据范围的设置:")
     print(f"蛋白率实际范围: {test_data['protein_pct'].min():.2f} - {test_data['protein_pct'].max():.2f}%")
     print(f"体细胞数实际范围: {test_data['somatic_cell_count'].min():.0f} - {test_data['somatic_cell_count'].max():.0f}万/ml")
-    print(f"脂肪率实际范围: {test_data['fat_pct'].min():.2f} - {test_data['fat_pct'].max():.2f}%")
+    print(f"乳脂率实际范围: {test_data['fat_pct'].min():.2f} - {test_data['fat_pct'].max():.2f}%")
     print(f"产奶量实际范围: {test_data['milk_yield'].min():.0f} - {test_data['milk_yield'].max():.0f}kg")
     
     # 检查筛选控件是否设置为实际范围

@@ -1497,7 +1497,7 @@ class DataProcessor:
             field_chinese_map = {
                 'protein_pct': '蛋白率(%)',
                 'somatic_cell_count': '体细胞数(万/ml)',
-                'fat_pct': '脂肪率(%)',
+                'fat_pct': '乳脂率(%)',
                 'lactose_pct': '乳糖率(%)',
                 'milk_yield': '产奶量(Kg)',
                 'lactation_days': '泌乳天数(天)',
@@ -1627,7 +1627,7 @@ class DataProcessor:
             field_chinese_map = {
                 'protein_pct': '蛋白率(%)',
                 'somatic_cell_count': '体细胞数(万/ml)',
-                'fat_pct': '脂肪率(%)',
+                'fat_pct': '乳脂率(%)',
                 'lactose_pct': '乳糖率(%)',
                 'milk_yield': '产奶量(Kg)',
                 'lactation_days': '泌乳天数(天)',
@@ -1693,7 +1693,7 @@ class DataProcessor:
             field_chinese_map = {
                 'protein_pct': '蛋白率(%)',
                 'somatic_cell_count': '体细胞数(万/ml)',
-                'fat_pct': '脂肪率(%)',
+                'fat_pct': '乳脂率(%)',
                 'lactose_pct': '乳糖率(%)',
                 'milk_yield': '产奶量(Kg)',
                 'lactation_days': '泌乳天数(天)',
@@ -1980,7 +1980,7 @@ class DataProcessor:
         # 直接映射常用字段
         field_chinese_map = {
             'protein_pct': '蛋白率(%)',
-            'fat_pct': '脂肪率(%)',
+            'fat_pct': '乳脂率(%)',
             'lactose_pct': '乳糖率(%)',
             'solids_pct': '固形物(%)',
             'milk_yield': '产奶量',
@@ -2626,7 +2626,7 @@ class DataProcessor:
                             suggested_min = max(0, min_val - range_margin)
                             suggested_max = min(10, max_val + range_margin)
                         elif field == 'fat_pct':
-                            # 脂肪率：类似处理
+                            # 乳脂率：类似处理
                             range_margin = (max_val - min_val) * 0.1
                             suggested_min = max(0, min_val - range_margin)
                             suggested_max = min(15, max_val + range_margin)
@@ -2696,7 +2696,7 @@ class DataProcessor:
             default_min = max(field_range['suggested_min'], mean_val - 0.5)
             default_max = min(field_range['suggested_max'], mean_val + 0.5)
         elif field == 'fat_pct':
-            # 脂肪率：类似处理
+            # 乳脂率：类似处理
             mean_val = field_range['mean']
             default_min = max(field_range['suggested_min'], mean_val - 0.5)
             default_max = min(field_range['suggested_max'], mean_val + 0.5)

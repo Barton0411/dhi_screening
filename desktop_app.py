@@ -1391,7 +1391,7 @@ class MainWindow(QMainWindow):
      
     def init_ui(self):
         """初始化界面"""
-        self.setWindowTitle("DHI数据分析与牛群健康监测系统")
+        self.setWindowTitle("DHI数据分析与牛群健康监测系统 - 伊利液奶奶科院")
         
         # 创建菜单栏
         self.create_menu_bar()
@@ -1593,10 +1593,12 @@ class MainWindow(QMainWindow):
     
     def show_about(self):
         """显示关于对话框"""
-        QMessageBox.about(self, "关于DHI智能筛选大师",
-                          "DHI智能筛选大师 v2.6\n\n"
+        QMessageBox.about(self, "关于DHI筛查分析系统",
+                          "DHI筛查分析系统 v3.0\n\n"
+                         "伊利液奶奶科院\n"
                          "用于处理DHI报告中的蛋白质筛选数据\n"
-                         "支持批量文件处理和多种筛选条件\n\n"
+                         "支持批量文件处理和多种筛选条件\n"
+                         "乳房炎筛查和监测分析功能\n\n"
                          "如有问题请联系技术支持")
     
     def restart_application(self):
@@ -1782,7 +1784,7 @@ class MainWindow(QMainWindow):
         """设置状态栏"""
         status_bar = self.statusBar()
         if status_bar is not None:
-            status_bar.showMessage("准备就绪")
+            status_bar.showMessage("伊利液奶奶科院 DHI筛查分析系统 - 准备就绪")
             status_bar.setStyleSheet(f"""
                 QStatusBar {{
                     background-color: #e9ecef;
@@ -1822,7 +1824,7 @@ class MainWindow(QMainWindow):
         title_layout.addWidget(icon_label)
         
         # 标题文字
-        title_label = QLabel("奶牛蛋白筛查系统")
+        title_label = QLabel("DHI筛查分析系统")
         title_label.setStyleSheet(f"""
             font-weight: bold;
             color: white;
@@ -1857,7 +1859,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(settings_btn)
         
         # 右侧副标题
-        subtitle_label = QLabel("DHI报告 04-2综合测定结果表筛查工具")
+        subtitle_label = QLabel("伊利液奶奶科院 | DHI报告筛查分析工具")
         subtitle_label.setStyleSheet(f"""
             color: rgba(255, 255, 255, 0.8);
             background: transparent;

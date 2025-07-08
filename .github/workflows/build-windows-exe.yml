@@ -1,0 +1,52 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  build-windows-exe:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyinstaller
+        pip install -r requirements.txt
+    
+    - name: Build EXE with PyInstaller
+      run: |
+        pyinstaller --clean --noconfirm "DHI筛查分析系统_v3.0.spec"
+    
+    - name: Create release package
+      run: |
+        mkdir release
+        xcopy "dist\DHI筛查分析系统_v3.0" "release\DHI筛查分析系统_v3.0" /E /I
+        
+    - name: Upload Windows EXE
+      uses: actions/upload-artifact@v3
+      with:
+        name: DHI筛查分析系统_v3.0_Windows
+        path: release/
+        
+    - name: Compress for release
+      run: |
+        powershell Compress-Archive -Path "release\*" -DestinationPath "DHI筛查分析系统_v3.0_Windows.zip"
+        
+    - name: Upload ZIP package
+      uses: actions/upload-artifact@v3
+      with:
+        name: DHI筛查分析系统_v3.0_Windows_ZIP
+        path: DHI筛查分析系统_v3.0_Windows.zip 

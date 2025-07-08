@@ -22,11 +22,46 @@ a = Analysis(
         ('需求说明.md', '.')
     ],
     hiddenimports=[
+        # PyQt6 GUI库
         'PyQt6.QtCore',
-        'PyQt6.QtGui',
+        'PyQt6.QtGui', 
         'PyQt6.QtWidgets',
+        'PyQt6.QtPrintSupport',
+        
+        # 数据处理库
         'pandas',
+        'pandas._libs.tslibs.base',
+        'pandas._libs.tslibs.nattype',
+        'pandas._libs.tslibs.np_datetime',
+        'pandas._libs.tslibs.timedeltas',
+        'pandas._libs.tslibs.timestamps',
+        
+        # NumPy核心模块 (修复docstring错误)
         'numpy',
+        'numpy.core',
+        'numpy.core._multiarray_umath',
+        'numpy.core._multiarray_tests',
+        'numpy.core.multiarray',
+        'numpy.core.numeric',
+        'numpy.core.umath',
+        'numpy.core._string_helpers',
+        'numpy.core._dtype_ctypes',
+        'numpy.core._internal',
+        'numpy.linalg',
+        'numpy.linalg.lapack_lite',
+        'numpy.linalg._umath_linalg',
+        'numpy.random',
+        'numpy.random._common',
+        'numpy.random._pickle',
+        'numpy.random.bit_generator',
+        'numpy.random.mtrand',
+        'numpy.random._generator',
+        'numpy.random._mt19937',
+        'numpy.random._pcg64',
+        'numpy.random._philox',
+        'numpy.random._sfc64',
+        
+        # 其他库
         'openpyxl',
         'yaml',
         'pyqtgraph',
@@ -41,7 +76,8 @@ a = Analysis(
         'math',
         'statistics',
         'hashlib',
-        'uuid'
+        'uuid',
+        'typing_extensions'
     ],
     hookspath=[],
     hooksconfig={},

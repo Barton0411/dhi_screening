@@ -28,25 +28,25 @@ jobs:
     
     - name: Build EXE with PyInstaller
       run: |
-        pyinstaller --clean --noconfirm "DHI筛查分析系统_v3.0.spec"
+        pyinstaller --clean --noconfirm "DHI_Screening_System_v3.0.spec"
     
     - name: Create release package
       run: |
         mkdir release
-        xcopy "dist\DHI筛查分析系统_v3.0" "release\DHI筛查分析系统_v3.0" /E /I
+        xcopy "dist\DHI_Screening_System_v3.0" "release\DHI_Screening_System_v3.0" /E /I
         
     - name: Upload Windows EXE
       uses: actions/upload-artifact@v4
       with:
-        name: DHI筛查分析系统_v3.0_Windows
+        name: DHI_Screening_System_v3.0_Windows
         path: release/
         
     - name: Compress for release
       run: |
-        powershell Compress-Archive -Path "release\*" -DestinationPath "DHI筛查分析系统_v3.0_Windows.zip"
+        powershell Compress-Archive -Path "release\*" -DestinationPath "DHI_Screening_System_v3.0_Windows.zip"
         
     - name: Upload ZIP package
       uses: actions/upload-artifact@v4
       with:
-        name: DHI筛查分析系统_v3.0_Windows_ZIP
-        path: DHI筛查分析系统_v3.0_Windows.zip 
+        name: DHI_Screening_System_v3.0_Windows_ZIP
+        path: DHI_Screening_System_v3.0_Windows.zip 

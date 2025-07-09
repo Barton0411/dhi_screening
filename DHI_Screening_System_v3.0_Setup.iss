@@ -34,9 +34,9 @@ Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
 
-; System Requirements
-MinVersion=10.0
-ArchitecturesAllowed=x64
+; System Requirements - 兼容更多Windows系统
+MinVersion=6.1
+ArchitecturesAllowed=x86 x64
 ArchitecturesInstallIn64BitMode=x64
 
 ; Permission Settings

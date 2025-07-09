@@ -46,19 +46,62 @@ jobs:
         $innoPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
         if (Test-Path $innoPath) {
           Write-Host "✅ Inno Setup安装成功"
-          & $innoPath
+          Write-Host "ISCC.exe路径: $innoPath"
         } else {
           Write-Host "❌ Inno Setup安装失败"
+          exit 1
+        }
+        
+    - name: Check required files
+      run: |
+        Write-Host "检查必要文件是否存在:"
+        $requiredFiles = @(
+          "DHI_Screening_System_v3.0_Setup.iss",
+          "LICENSE.txt", 
+          "whg3r-qi1nv-001.ico",
+          "README.md",
+          "DHI_精准筛查助手-操作说明.md",
+          "需求说明.md",
+          "config.yaml",
+          "rules.yaml"
+        )
+        
+        foreach ($file in $requiredFiles) {
+          if (Test-Path $file) {
+            Write-Host "✅ $file 存在"
+          } else {
+            Write-Host "❌ $file 不存在"
+          }
+        }
+        
+        Write-Host "`n检查PyInstaller输出目录:"
+        if (Test-Path "dist\DHI_Screening_System_v3.0") {
+          Write-Host "✅ dist\DHI_Screening_System_v3.0 存在"
+          $fileCount = (Get-ChildItem "dist\DHI_Screening_System_v3.0" -Recurse).Count
+          Write-Host "   包含 $fileCount 个文件"
+        } else {
+          Write-Host "❌ dist\DHI_Screening_System_v3.0 不存在"
           exit 1
         }
         
     - name: Create installer with Inno Setup
       run: |
         # 创建installer目录
-        mkdir -p installer
+        if (-not (Test-Path "installer")) {
+          New-Item -ItemType Directory -Path "installer"
+        }
         # 编译安装脚本
         $isccPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+        Write-Host "开始编译安装脚本..."
+        Write-Host "脚本文件: DHI_Screening_System_v3.0_Setup.iss"
+        Write-Host "工作目录: $(Get-Location)"
         & $isccPath "DHI_Screening_System_v3.0_Setup.iss"
+        if ($LASTEXITCODE -eq 0) {
+          Write-Host "✅ 安装脚本编译成功"
+        } else {
+          Write-Host "❌ 安装脚本编译失败，退出代码: $LASTEXITCODE"
+          exit 1
+        }
         
     - name: Verify installer creation
       run: |

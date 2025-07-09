@@ -26,7 +26,6 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 LicenseFile=LICENSE.txt
-InfoBeforeFile=README.md
 OutputDir=installer
 OutputBaseFilename={#MyAppName}_v{#MyAppVersion}_Setup
 SetupIconFile=whg3r-qi1nv-001.ico

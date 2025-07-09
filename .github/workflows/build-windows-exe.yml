@@ -105,12 +105,14 @@ jobs:
         
     - name: Verify installer creation
       run: |
-        $installerPath = "installer\DHI筛查分析系统_v3.0_Setup.exe"
+        $installerPath = "installer\DHI_Screening_System_v3.0_Setup.exe"
         if (Test-Path $installerPath) {
           $fileSize = (Get-Item $installerPath).Length / 1MB
           Write-Host "✅ 安装包生成成功: $([math]::Round($fileSize, 2)) MB"
+          Write-Host "📁 安装包路径: $installerPath"
         } else {
           Write-Host "❌ 安装包生成失败"
+          Write-Host "📁 installer目录内容:"
           Get-ChildItem installer -ErrorAction SilentlyContinue
           exit 1
         }
@@ -150,7 +152,7 @@ jobs:
         $content = "# DHI筛查分析系统 v3.0 构建信息`n`n"
         $content += "## 开发单位`n伊利液奶奶科院`n`n"
         $content += "## 构建产物`n"
-        $content += "1. 安装包版本: DHI筛查分析系统_v3.0_Setup.exe`n"
+        $content += "1. 安装包版本: DHI_Screening_System_v3.0_Setup.exe`n"
         $content += "   - 专业Windows安装程序`n"
         $content += "   - 支持开始菜单、桌面快捷方式`n"
         $content += "   - 包含完整的卸载功能`n"
@@ -170,7 +172,7 @@ jobs:
         $content += "- 牛群健康管理`n`n"
         $content += "## 安装说明`n"
         $content += "### 安装包版本`n"
-        $content += "1. 下载 DHI筛查分析系统_v3.0_Setup.exe`n"
+        $content += "1. 下载 DHI_Screening_System_v3.0_Setup.exe`n"
         $content += "2. 以管理员身份运行安装程序`n"
         $content += "3. 按照安装向导完成安装`n"
         $content += "4. 从开始菜单启动程序`n`n"

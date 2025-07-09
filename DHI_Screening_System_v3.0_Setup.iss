@@ -58,8 +58,8 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "dist\DHI_Screening_System_v3.0\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Documentation
 Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "DHI_精准筛查助手-操作说明.md"; DestDir: "{app}"; Flags: ignoreversion; DestName: "Operation_Manual.md"
-Source: "需求说明.md"; DestDir: "{app}"; Flags: ignoreversion; DestName: "Requirements.md"
+Source: "DHI_精准筛查助手-操作说明.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist; DestName: "Operation_Manual.md"
+Source: "需求说明.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist; DestName: "Requirements.md"
 ; Configuration Files
 Source: "config.yaml"; DestDir: "{app}"; Flags: ignoreversion
 Source: "rules.yaml"; DestDir: "{app}"; Flags: ignoreversion

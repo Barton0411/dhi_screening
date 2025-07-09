@@ -1,4 +1,4 @@
-name: Build Windows EXE
+name: Build Windows EXE and Installer
 
 on:
   push:
@@ -30,23 +30,117 @@ jobs:
       run: |
         pyinstaller --clean --noconfirm "DHI_Screening_System_v3.0.spec"
     
-    - name: Create release package
+    - name: Install Inno Setup
+      run: |
+        # 下载并安装Inno Setup
+        $url = "https://jrsoftware.org/download.php/is.exe"
+        $output = "innosetup-installer.exe"
+        Invoke-WebRequest -Uri "https://files.jrsoftware.org/is/6/innosetup-6.2.2.exe" -OutFile $output
+        Start-Process -FilePath $output -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
+        # 添加Inno Setup到PATH
+        $env:PATH += ";C:\Program Files (x86)\Inno Setup 6"
+        echo "C:\Program Files (x86)\Inno Setup 6" >> $env:GITHUB_PATH
+        
+    - name: Verify Inno Setup installation
+      run: |
+        $innoPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+        if (Test-Path $innoPath) {
+          Write-Host "✅ Inno Setup安装成功"
+          & $innoPath
+        } else {
+          Write-Host "❌ Inno Setup安装失败"
+          exit 1
+        }
+        
+    - name: Create installer with Inno Setup
+      run: |
+        # 创建installer目录
+        mkdir -p installer
+        # 编译安装脚本
+        $isccPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+        & $isccPath "DHI_Screening_System_v3.0_Setup.iss"
+        
+    - name: Verify installer creation
+      run: |
+        $installerPath = "installer\DHI筛查分析系统_v3.0_Setup.exe"
+        if (Test-Path $installerPath) {
+          $fileSize = (Get-Item $installerPath).Length / 1MB
+          Write-Host "✅ 安装包生成成功: $([math]::Round($fileSize, 2)) MB"
+        } else {
+          Write-Host "❌ 安装包生成失败"
+          Get-ChildItem installer -ErrorAction SilentlyContinue
+          exit 1
+        }
+    
+    - name: Create release package (Portable)
       run: |
         mkdir release
         xcopy "dist\DHI_Screening_System_v3.0" "release\DHI_Screening_System_v3.0" /E /I
+        xcopy "README.md" "release\" /Y
+        xcopy "DHI_精准筛查助手-操作说明.md" "release\" /Y
+        xcopy "LICENSE.txt" "release\" /Y
         
-    - name: Upload Windows EXE
+    - name: Upload Portable Version
       uses: actions/upload-artifact@v4
       with:
-        name: DHI_Screening_System_v3.0_Windows
+        name: DHI_Screening_System_v3.0_Portable
         path: release/
         
-    - name: Compress for release
-      run: |
-        powershell Compress-Archive -Path "release\*" -DestinationPath "DHI_Screening_System_v3.0_Windows.zip"
-        
-    - name: Upload ZIP package
+    - name: Upload Windows Installer
       uses: actions/upload-artifact@v4
       with:
-        name: DHI_Screening_System_v3.0_Windows_ZIP
-        path: DHI_Screening_System_v3.0_Windows.zip 
+        name: DHI_Screening_System_v3.0_Installer
+        path: installer/
+        
+    - name: Compress portable for release
+      run: |
+        powershell Compress-Archive -Path "release\*" -DestinationPath "DHI_Screening_System_v3.0_Portable.zip"
+        
+    - name: Upload Portable ZIP
+      uses: actions/upload-artifact@v4
+      with:
+        name: DHI_Screening_System_v3.0_Portable_ZIP
+        path: DHI_Screening_System_v3.0_Portable.zip
+        
+    - name: Create release info
+      run: |
+        $content = "# DHI筛查分析系统 v3.0 构建信息`n`n"
+        $content += "## 开发单位`n伊利液奶奶科院`n`n"
+        $content += "## 构建产物`n"
+        $content += "1. 安装包版本: DHI筛查分析系统_v3.0_Setup.exe`n"
+        $content += "   - 专业Windows安装程序`n"
+        $content += "   - 支持开始菜单、桌面快捷方式`n"
+        $content += "   - 包含完整的卸载功能`n"
+        $content += "   - 推荐用于生产环境`n`n"
+        $content += "2. 便携版本: DHI_Screening_System_v3.0_Portable.zip`n"
+        $content += "   - 免安装绿色版本`n"
+        $content += "   - 解压即用，无需管理员权限`n"
+        $content += "   - 适合临时使用或测试`n`n"
+        $content += "## 系统要求`n"
+        $content += "- Windows 10 或更高版本 (64位)`n"
+        $content += "- 4GB RAM (推荐8GB)`n"
+        $content += "- 500MB 可用磁盘空间`n`n"
+        $content += "## 主要功能`n"
+        $content += "- DHI数据筛选分析`n"
+        $content += "- 隐形乳房炎监测`n"
+        $content += "- 慢性乳房炎筛查`n"
+        $content += "- 牛群健康管理`n`n"
+        $content += "## 安装说明`n"
+        $content += "### 安装包版本`n"
+        $content += "1. 下载 DHI筛查分析系统_v3.0_Setup.exe`n"
+        $content += "2. 以管理员身份运行安装程序`n"
+        $content += "3. 按照安装向导完成安装`n"
+        $content += "4. 从开始菜单启动程序`n`n"
+        $content += "### 便携版本`n"
+        $content += "1. 下载 DHI_Screening_System_v3.0_Portable.zip`n"
+        $content += "2. 解压到任意目录`n"
+        $content += "3. 运行 DHI_Screening_System_v3.0.exe`n`n"
+        $content += "构建时间: $(Get-Date)`n"
+        $content += "构建版本: GitHub Actions 自动构建"
+        $content | Out-File -FilePath "构建说明.txt" -Encoding UTF8
+        
+    - name: Upload release info
+      uses: actions/upload-artifact@v4
+      with:
+        name: Build_Info
+        path: 构建说明.txt 

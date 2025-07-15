@@ -220,7 +220,7 @@ class DataProcessor:
             
             if filename.endswith('.zip'):
                 return self._process_zip_file(file_path, detected_date)
-            elif filename.endswith('.xlsx'):
+            elif filename.endswith(('.xlsx', '.xls')):
                 return self._process_excel_file(file_path, detected_date)
             else:
                 return False, "不支持的文件格式", None
@@ -358,22 +358,31 @@ class DataProcessor:
             missing_columns = []
             
             # 检查必要的列 - 移除强制的蛋白率要求，改为可选
-            if has_farm_id:
-                required_columns = ['牛场编号', '管理号', '胎次(胎)', '采样日期']
-                # 蛋白率改为推荐列，不强制要求
-                recommended_columns = ['蛋白率(%)', '产奶量(Kg)', '泌乳天数(天)']
-            else:
-                # 老版本可能用不同的字段名
-                required_columns = ['牛号', '胎次', '采样日期']
-                recommended_columns = ['蛋白率', '产奶量', '泌乳天数']
-                # 也检查新版本字段名的兼容性
-                alt_required = ['管理号', '胎次(胎)', '采样日期']
-                alt_recommended = ['蛋白率(%)', '产奶量(Kg)', '泌乳天数(天)']
-                for alt_col in alt_required:
-                    if alt_col in df.columns:
-                        required_columns = alt_required
-                        recommended_columns = alt_recommended
-                        break
+            # 同时移除对牧场编号的强制要求
+            required_columns = ['管理号', '胎次(胎)', '采样日期']
+            # 推荐列，不强制要求
+            recommended_columns = ['蛋白率(%)', '产奶量(Kg)', '泌乳天数(天)', '牛场编号']
+            
+            # 兼容老版本字段名
+            if not any(col in df.columns for col in required_columns):
+                # 尝试老版本字段名
+                alt_required = ['牛号', '胎次', '采样日期']
+                alt_recommended = ['蛋白率', '产奶量', '泌乳天数', '牛场编号']
+                
+                # 检查是否存在老版本字段
+                if any(col in df.columns for col in alt_required):
+                    required_columns = alt_required
+                    recommended_columns = alt_recommended
+                else:
+                    # 如果都不存在，尝试更灵活的匹配
+                    flexible_required = []
+                    for col in df.columns:
+                        if any(keyword in col for keyword in ['牛号', '管理号', '编号']) and '牧场' not in col and '牛场' not in col:
+                            if '管理号' in required_columns:
+                                required_columns = [col if c == '管理号' else c for c in required_columns]
+                            elif '牛号' in required_columns:
+                                required_columns = [col if c == '牛号' else c for c in required_columns]
+                            break
             
             for chinese_col in required_columns:
                 if chinese_col not in df.columns:
@@ -412,29 +421,34 @@ class DataProcessor:
                     logger.info(f"找到替代列名: {found_alternatives}")
                     missing_columns = still_missing
             
-            # 如果仍然缺少关键列且不是只缺少牛场编号的问题
-            if missing_columns and not (missing_farm_id_info and len(missing_columns) <= 2):
-                # 特殊处理：如果缺少牛场编号，允许更宽松的验证
-                if missing_farm_id_info:
-                    # 检查是否至少有管理号/牛号、采样日期、蛋白率中的大部分
-                    essential_found = 0
-                    for col in df.columns:
-                        if any(keyword in col for keyword in ['牛号', '管理号', '编号']):
-                            essential_found += 1
-                        elif any(keyword in col for keyword in ['日期', '时间']):
-                            essential_found += 1
-                        elif any(keyword in col for keyword in ['蛋白', '蛋白率']):
-                            essential_found += 1
-                    
-                    if essential_found >= 2:
-                        logger.warning(f"文件缺少牛场编号，但包含基本字段，继续处理: {missing_columns}")
-                        missing_columns = []  # 清空，允许继续处理
+            # 简化的缺失列检查 - 只要有基本字段就允许处理
+            if missing_columns:
+                # 检查是否至少有管理号/牛号和采样日期
+                essential_found = 0
+                id_found = False
+                date_found = False
+                
+                for col in df.columns:
+                    if any(keyword in col for keyword in ['牛号', '管理号', '编号']) and '牧场' not in col and '牛场' not in col:
+                        id_found = True
+                        essential_found += 1
+                    elif any(keyword in col for keyword in ['日期', '时间']):
+                        date_found = True
+                        essential_found += 1
+                
+                # 只要有ID字段和日期字段就允许处理
+                if id_found and date_found:
+                    logger.warning(f"文件缺少部分列但包含基本字段，继续处理: {missing_columns}")
+                    missing_columns = []  # 清空，允许继续处理
+                elif essential_found >= 1:
+                    # 至少有一个关键字段，也允许处理
+                    logger.warning(f"文件缺少部分列但包含关键字段，继续处理: {missing_columns}")
+                    missing_columns = []
                 
                 if missing_columns:
                     logger.error(f"缺失必要列: {missing_columns}")
                     logger.info(f"文件中实际包含的列: {list(df.columns)}")
                     
-                    # 即使失败，如果有missing_farm_id_info，也要记录
                     error_msg = f"缺失必要列: {', '.join(missing_columns)}"
                     if missing_farm_id_info:
                         # 创建一个包含错误信息但保留missing_farm_id_info的特殊返回
@@ -752,8 +766,12 @@ class DataProcessor:
         original_cow_count = 0
         
         # 统计原始牛头数
-        if 'farm_id' in df.columns and 'management_id' in df.columns:
-            original_cow_count = len(df.groupby(['farm_id', 'management_id']))
+        if 'management_id' in df.columns:
+            if 'farm_id' in df.columns:
+                original_cow_count = len(df.groupby(['farm_id', 'management_id']))
+            else:
+                mgmt_series = df['management_id']
+                original_cow_count = len(mgmt_series.dropna().unique())
         
         # 只保留胎次在指定范围内的记录
         parity_mask = (df['parity'] >= min_parity) & (df['parity'] <= max_parity)
@@ -763,8 +781,12 @@ class DataProcessor:
         filtered_cow_count = 0
         
         # 统计筛选后牛头数
-        if not filtered_df.empty and 'farm_id' in filtered_df.columns and 'management_id' in filtered_df.columns:
-            filtered_cow_count = len(filtered_df.groupby(['farm_id', 'management_id']))
+        if not filtered_df.empty and 'management_id' in filtered_df.columns:
+            if 'farm_id' in filtered_df.columns:
+                filtered_cow_count = len(filtered_df.groupby(['farm_id', 'management_id']))
+            else:
+                mgmt_ids = filtered_df['management_id'].dropna().unique()
+                filtered_cow_count = len(mgmt_ids)
         
         logger.info(f"胎次筛选结果: {original_count}条记录 -> {filtered_count}条记录")
         logger.info(f"胎次筛选结果: {original_cow_count}头牛 -> {filtered_cow_count}头牛")
@@ -1212,11 +1234,17 @@ class DataProcessor:
             return pd.DataFrame()
         
         # 应用跨月逻辑：找出在所有月份都符合条件的牛
-        if 'farm_id' not in filtered_df.columns or 'management_id' not in filtered_df.columns:
+        if 'management_id' not in filtered_df.columns:
             return filtered_df
         
-        # 按牛场编号和管理号分组
-        cow_groups = filtered_df.groupby(['farm_id', 'management_id'])
+        # 动态确定分组键
+        if 'farm_id' in filtered_df.columns:
+            group_keys = ['farm_id', 'management_id']
+        else:
+            group_keys = ['management_id']
+        
+        # 按分组键分组
+        cow_groups = filtered_df.groupby(group_keys)
         
         # 获取选中文件对应的月份
         selected_months = set()
@@ -1231,19 +1259,31 @@ class DataProcessor:
         
         # 筛选在所有选定月份都有数据的牛
         valid_cows = []
-        for (farm_id, mgmt_id), group in cow_groups:
+        for group_key, group in cow_groups:
             cow_months = set(group['year_month'].unique())
             
             # 检查是否在所有选定月份都符合条件
             if selected_months.issubset(cow_months):
-                valid_cows.append((farm_id, mgmt_id))
+                # 保持与其他函数一致的处理方式
+                if 'farm_id' in df.columns:
+                    farm_id, mgmt_id = group_key
+                    valid_cows.append((farm_id, mgmt_id))
+                else:
+                    mgmt_id = group_key if not isinstance(group_key, tuple) else group_key[0]
+                    valid_cows.append(mgmt_id)
         
         # 返回符合条件的牛的所有数据
         if valid_cows:
-            cow_filter = filtered_df.apply(
-                lambda row: (row['farm_id'], row['management_id']) in valid_cows, 
-                axis=1
-            )
+            if 'farm_id' in filtered_df.columns:
+                cow_filter = filtered_df.apply(
+                    lambda row: (row['farm_id'], row['management_id']) in valid_cows, 
+                    axis=1
+                )
+            else:
+                cow_filter = filtered_df.apply(
+                    lambda row: row['management_id'] in valid_cows, 
+                    axis=1
+                )
             return filtered_df[cow_filter]
         
         return pd.DataFrame()
@@ -1307,30 +1347,35 @@ class DataProcessor:
         include_null_as_match = treat_empty_as_match
         logger.info(f"空值判定为符合：{include_null_as_match}")
         
-        # 应用基础筛选条件（除了蛋白率，因为我们需要特殊处理）
-        base_filters = filters.copy()
-        protein_filter = base_filters.pop('protein_pct', None)
-        # 移除未来泌乳天数筛选，这将在最后单独处理
-        base_filters.pop('future_lactation_days', None)
+        # 应用基础筛选条件（只保留简单筛选，移除所有需要月份逻辑的筛选项）
+        base_filters = {}
+        monthly_filters = {}  # 需要月份逻辑处理的筛选项
         
-        # 为基础筛选器添加空值处理参数
-        for filter_name, filter_config in base_filters.items():
-            if isinstance(filter_config, dict) and filter_config.get('enabled', False):
-                filter_config['include_null_as_match'] = include_null_as_match
+        for filter_name, filter_config in filters.items():
+            if filter_name in ['parity', 'date_range']:
+                # 基础筛选：胎次、日期范围
+                if filter_config.get('enabled', False):
+                    base_filters[filter_name] = filter_config
+            elif filter_name not in ['future_lactation_days'] and isinstance(filter_config, dict) and filter_config.get('enabled', False):
+                # 月份逻辑筛选：蛋白率、乳脂率等所有启用的数值筛选项
+                monthly_filters[filter_name] = filter_config
         
-        # 先应用其他筛选条件
+        # 只应用不需要月份逻辑的基础筛选条件
         base_filtered_df = self.apply_filters(combined_df, base_filters)
-        logger.info(f"基础筛选后（不含蛋白率）：共{len(base_filtered_df)}行")
+        logger.info(f"基础筛选后：共{len(base_filtered_df)}行，启用的月份逻辑筛选项：{list(monthly_filters.keys())}")
         
         if base_filtered_df.empty:
             return pd.DataFrame()
         
         # 检查必要字段
-        if 'farm_id' not in base_filtered_df.columns or 'management_id' not in base_filtered_df.columns:
+        if 'management_id' not in base_filtered_df.columns:
             return base_filtered_df
         
         # 获取所有牛只
-        all_cows = base_filtered_df[['farm_id', 'management_id']].drop_duplicates()
+        if 'farm_id' in base_filtered_df.columns:
+            all_cows = base_filtered_df[['farm_id', 'management_id']].drop_duplicates()
+        else:
+            all_cows = base_filtered_df[['management_id']].drop_duplicates()
         logger.info(f"筛选范围内共有{len(all_cows)}头牛")
         
         # 对每头牛检查每个月份的符合情况
@@ -1347,14 +1392,23 @@ class DataProcessor:
             logger.warning(f"更新进度失败: {e}")
         
         for _, cow_row in all_cows.iterrows():
-            farm_id = cow_row['farm_id']
-            mgmt_id = cow_row['management_id']
-            
-            # 获取这头牛的所有数据
-            cow_data = base_filtered_df[
-                (base_filtered_df['farm_id'] == farm_id) & 
-                (base_filtered_df['management_id'] == mgmt_id)
-            ]
+            if 'farm_id' in cow_row.index:
+                farm_id = cow_row['farm_id']
+                mgmt_id = cow_row['management_id']
+                
+                # 获取这头牛的所有数据
+                cow_data = base_filtered_df[
+                    (base_filtered_df['farm_id'] == farm_id) & 
+                    (base_filtered_df['management_id'] == mgmt_id)
+                ]
+            else:
+                farm_id = None
+                mgmt_id = cow_row['management_id']
+                
+                # 获取这头牛的所有数据
+                cow_data = base_filtered_df[
+                    base_filtered_df['management_id'] == mgmt_id
+                ]
             
             # 检查每个月份的符合情况
             matched_months = 0
@@ -1371,46 +1425,86 @@ class DataProcessor:
                     else:
                         logger.debug(f"牛场{farm_id}-管理号{mgmt_id} {month}月：无数据，不符合")
                 else:
-                    # 这个月份有数据，检查蛋白率条件
-                    if protein_filter and protein_filter.get('enabled', True):
-                        # 检查蛋白率列是否有值，空值判定仅针对蛋白率
-                        protein_values = month_data['protein_pct'].dropna()
-                        if len(protein_values) == 0:
-                            # 蛋白率为空，根据设置判断
-                            if include_null_as_match:
-                                matched_months += 1
-                                logger.debug(f"牛场{farm_id}-管理号{mgmt_id} {month}月：蛋白率为空，空值判定为符合")
-                            else:
-                                logger.debug(f"牛场{farm_id}-管理号{mgmt_id} {month}月：蛋白率为空，不符合")
-                        else:
-                            # 蛋白率有值，检查是否符合条件
-                            month_filtered = self.apply_numeric_filter(month_data, 'protein_pct', protein_filter)
-                            if len(month_filtered) > 0:
-                                matched_months += 1
-                                logger.debug(f"牛场{farm_id}-管理号{mgmt_id} {month}月：蛋白率符合条件")
-                            else:
-                                logger.debug(f"牛场{farm_id}-管理号{mgmt_id} {month}月：蛋白率不符合条件")
-                    else:
-                        # 没有蛋白率筛选条件，有数据就算符合
+                    # 这个月份有数据，检查所有启用的月份逻辑筛选项
+                    month_satisfies_all = True
+                    filter_details = []
+                    
+                    if not monthly_filters:
+                        # 没有月份逻辑筛选项，有数据就算符合
                         matched_months += 1
-                        logger.debug(f"牛场{farm_id}-管理号{mgmt_id} {month}月：有数据，符合")
+                        logger.debug(f"牛场{farm_id}-管理号{mgmt_id} {month}月：无月份筛选项，有数据符合")
+                    else:
+                        # 检查每个月份逻辑筛选项
+                        for filter_name, filter_config in monthly_filters.items():
+                            field = filter_config.get('field')
+                            
+                            if not field or field not in month_data.columns:
+                                filter_details.append(f"{filter_name}:字段不存在")
+                                continue
+                            
+                            # 获取该字段的值
+                            field_values = month_data[field].dropna()
+                            
+                            if len(field_values) == 0:
+                                # 该字段为空
+                                if include_null_as_match:
+                                    filter_details.append(f"{filter_name}:空值符合")
+                                else:
+                                    month_satisfies_all = False
+                                    filter_details.append(f"{filter_name}:空值不符合")
+                                    break
+                            else:
+                                # 该字段有值，检查是否符合条件
+                                # 创建临时筛选配置，包含空值处理参数
+                                temp_filter_config = filter_config.copy()
+                                temp_filter_config['include_null_as_match'] = include_null_as_match
+                                
+                                month_filtered = self.apply_numeric_filter(month_data, field, temp_filter_config)
+                                if len(month_filtered) > 0:
+                                    filter_details.append(f"{filter_name}:数值符合")
+                                else:
+                                    month_satisfies_all = False
+                                    filter_details.append(f"{filter_name}:数值不符合")
+                                    break
+                        
+                        # 所有筛选项都符合才算这个月符合
+                        if month_satisfies_all:
+                            matched_months += 1
+                            logger.debug(f"牛场{farm_id}-管理号{mgmt_id} {month}月：所有条件符合 ({', '.join(filter_details)})")
+                        else:
+                            logger.debug(f"牛场{farm_id}-管理号{mgmt_id} {month}月：条件不符合 ({', '.join(filter_details)})")
             
             if matched_months >= min_match_months:
-                valid_cows.append((farm_id, mgmt_id))
-                logger.debug(f"牛场{farm_id}-管理号{mgmt_id}: {matched_months}个月符合条件，保留")
+                if farm_id is not None:
+                    valid_cows.append((farm_id, mgmt_id))
+                    logger.debug(f"牛场{farm_id}-管理号{mgmt_id}: {matched_months}个月符合条件，保留")
+                else:
+                    valid_cows.append(mgmt_id)
+                    logger.debug(f"管理号{mgmt_id}: {matched_months}个月符合条件，保留")
             else:
-                logger.debug(f"牛场{farm_id}-管理号{mgmt_id}: {matched_months}个月符合条件，不足{min_match_months}个月，淘汰")
+                if farm_id is not None:
+                    logger.debug(f"牛场{farm_id}-管理号{mgmt_id}: {matched_months}个月符合条件，不足{min_match_months}个月，淘汰")
+                else:
+                    logger.debug(f"管理号{mgmt_id}: {matched_months}个月符合条件，不足{min_match_months}个月，淘汰")
         
         logger.info(f"符合{min_match_months}个月条件的牛：{len(valid_cows)}头")
         
         # 返回符合条件的牛的所有数据 - 从base_filtered_df中返回，保持基础筛选条件
         if valid_cows:
-            all_cow_data = base_filtered_df[
-                base_filtered_df.apply(
-                    lambda row: (row['farm_id'], row['management_id']) in valid_cows, 
-                    axis=1
-                )
-            ]
+            if 'farm_id' in base_filtered_df.columns:
+                all_cow_data = base_filtered_df[
+                    base_filtered_df.apply(
+                        lambda row: (row['farm_id'], row['management_id']) in valid_cows, 
+                        axis=1
+                    )
+                ]
+            else:
+                all_cow_data = base_filtered_df[
+                    base_filtered_df.apply(
+                        lambda row: row['management_id'] in valid_cows, 
+                        axis=1
+                    )
+                ]
             return all_cow_data
         
         return pd.DataFrame()
@@ -1431,11 +1525,16 @@ class DataProcessor:
         # 使用传入的display_fields参数，支持动态字段配置
         logger.info(f"生成月度报告，使用字段: {display_fields}")
         
-        # 基础列：牛场编号、管理号、胎次
-        base_columns = ['farm_id', 'management_id', 'parity']
+        # 动态确定基础列和分组键
+        if 'farm_id' in df.columns:
+            base_columns = ['farm_id', 'management_id', 'parity']
+            group_keys = ['farm_id', 'management_id']
+        else:
+            base_columns = ['management_id', 'parity']
+            group_keys = ['management_id']
         
         # 按牛分组
-        cow_groups = df.groupby(['farm_id', 'management_id'])
+        cow_groups = df.groupby(group_keys)
         
         result_rows = []
         all_protein_milk_pairs = []  # 收集所有(蛋白率, 产奶量)对用于计算加权总平均值
@@ -1443,7 +1542,7 @@ class DataProcessor:
         
         # 收集所有月份信息
         all_months_data = {}
-        for (farm_id, mgmt_id), group in cow_groups:
+        for group_key, group in cow_groups:
             for _, record in group.iterrows():
                 if pd.notna(record['sample_date']):
                     sample_date = pd.to_datetime(record['sample_date'])
@@ -1455,7 +1554,14 @@ class DataProcessor:
         sorted_all_months = sorted(all_months_data.items(), key=lambda x: x[1])
         sorted_month_names = [month for month, _ in sorted_all_months]
         
-        for (farm_id, mgmt_id), group in cow_groups:
+        for group_key, group in cow_groups:
+            # 解析分组键
+            if 'farm_id' in df.columns:
+                farm_id, mgmt_id = group_key
+            else:
+                farm_id = None
+                # 确保mgmt_id是标量值，不是元组
+                mgmt_id = group_key if not isinstance(group_key, tuple) else group_key[0]
             # 获取胎次（取最后一次采样时的胎次）
             parity = None
             latest_sample_date = None
@@ -1488,7 +1594,8 @@ class DataProcessor:
             
             # 按固定顺序组织列
             # 1. 基础列
-            row_data['farm_id'] = farm_id
+            if farm_id is not None:
+                row_data['farm_id'] = farm_id
             row_data['management_id'] = mgmt_id
             row_data['parity'] = parity
             
@@ -2123,7 +2230,7 @@ class DataProcessor:
             
             # 步骤5：检查表头映射
             field_map = self.rules.get("field_map", {})
-            required_columns = ['牛场编号', '管理号', '胎次(胎)', '采样日期', '蛋白率(%)']
+            required_columns = ['管理号', '胎次(胎)', '采样日期']  # 移除牛场编号的强制要求
             
             # 确保field_map可以JSON序列化
             clean_field_map = {}
@@ -2309,6 +2416,12 @@ class DataProcessor:
         for filter_name, filter_config in filters.items():
             if filter_name in ['farm_id', 'parity', 'date_range']:
                 if filter_config.get('enabled', False):
+                    # 检查farm_id字段是否存在
+                    if filter_name == 'farm_id':
+                        field = filter_config.get('field', 'farm_id')
+                        if field not in combined_df.columns:
+                            logger.warning(f"跳过{filter_name}筛选：字段{field}不存在")
+                            continue
                     base_filters[filter_name] = filter_config
         
         # 应用基础筛选
@@ -2318,8 +2431,8 @@ class DataProcessor:
         if base_filtered_df.empty:
             return pd.DataFrame()
         
-        # 检查必要字段
-        if 'farm_id' not in base_filtered_df.columns or 'management_id' not in base_filtered_df.columns:
+        # 检查必要字段 - 只需要management_id，farm_id是可选的
+        if 'management_id' not in base_filtered_df.columns:
             return base_filtered_df
         
         # 收集启用的特殊筛选项（蛋白率、体细胞数等）
@@ -2359,11 +2472,15 @@ class DataProcessor:
             progress_callback("🚀 开始向量化筛选（高速模式）...", 35)
         
         # 获取所有牛只
-        all_cows = df[['farm_id', 'management_id']].drop_duplicates()
+        if 'farm_id' in df.columns:
+            all_cows = df[['farm_id', 'management_id']].drop_duplicates()
+            # 为每头牛创建唯一标识
+            df['cow_id'] = df['farm_id'].astype(str) + '_' + df['management_id'].astype(str)
+        else:
+            all_cows = df[['management_id']].drop_duplicates()
+            # 为每头牛创建唯一标识
+            df['cow_id'] = df['management_id'].astype(str)
         logger.info(f"筛选范围内共有{len(all_cows)}头牛，将使用向量化处理")
-        
-        # 为每头牛创建唯一标识
-        df['cow_id'] = df['farm_id'].astype(str) + '_' + df['management_id'].astype(str)
         all_cow_ids = set(df['cow_id'].unique())
         
         if progress_callback:

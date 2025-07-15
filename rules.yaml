@@ -110,8 +110,8 @@ filters:
   # 固定筛选范围
   farm_id:
     field: farm_id
-    enabled: true
-    required: true
+    enabled: false  # 默认不启用，由界面控制
+    required: false  # 不再强制要求
     chinese_name: "牛场编号"
     
   parity:

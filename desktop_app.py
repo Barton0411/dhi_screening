@@ -1215,14 +1215,15 @@ class MainWindow(QMainWindow):
             
             /* 表格 */
             QTableWidget {{
-                color: {font_color};
-                background-color: {background_color};
+                color: black;  /* 强制使用黑色字体 */
+                background-color: white;  /* 强制使用白色背景 */
                 gridline-color: {border_color};
                 selection-background-color: {accent_color}40;
             }}
             
             QTableWidget::item {{
-                color: {font_color};
+                color: black;  /* 强制使用黑色字体 */
+                background-color: white;  /* 强制使用白色背景 */
                 padding: 4px;
                 border: none;
             }}
@@ -3342,6 +3343,7 @@ class MainWindow(QMainWindow):
             QTextEdit {{
                 border: none;
                 background-color: #f8f9fa;
+                color: black;  /* 强制使用黑色字体 */
                 font-family: 'Consolas', 'Monaco', monospace;
                 font-size: {info_font_size}px;
                 padding: {info_padding}px;
@@ -3361,7 +3363,7 @@ class MainWindow(QMainWindow):
                 font-size: {info_font_size}px;
                 padding: {info_padding}px;
                 line-height: 1.5;
-                color: #333;
+                color: black;  /* 强制使用黑色字体 */
             }}
         """)
         # 设置初始内容
@@ -3831,6 +3833,7 @@ class MainWindow(QMainWindow):
                 border: 1px solid #bee5eb;
                 border-radius: 4px;
                 background-color: white;
+                color: black;  /* 强制使用黑色字体 */
                 font-family: 'Consolas', 'Monaco', monospace;
                 font-size: {stats_font_size}px;
                 padding: {stats_padding}px;
@@ -4022,7 +4025,7 @@ class MainWindow(QMainWindow):
             self, 
             "选择DHI报告文件",
             "",
-            "支持的文件 (*.zip *.xlsx);;ZIP文件 (*.zip);;Excel文件 (*.xlsx)"
+            "支持的文件 (*.zip *.xlsx *.xls);;ZIP文件 (*.zip);;Excel文件 (*.xlsx *.xls)"
         )
         
         if files:
@@ -8289,7 +8292,7 @@ class MainWindow(QMainWindow):
             self,
             "选择DHI报告文件（隐形乳房炎监测）",
             "",
-            "支持的文件 (*.zip *.xlsx);;ZIP文件 (*.zip);;Excel文件 (*.xlsx)"
+            "支持的文件 (*.zip *.xlsx *.xls);;ZIP文件 (*.zip);;Excel文件 (*.xlsx *.xls)"
         )
         
         if not files:

@@ -1,27 +1,46 @@
 DHI筛查分析系统 v3.0 软件许可协议
-伊利液奶奶科院
-===============================================
 
-版权声明
-Copyright (C) 2025 伊利液奶奶科院 版权所有
+版权所有 (C) 2025 伊利液奶奶科院
 
-软件许可条款
-本软件（"DHI筛查分析系统"）由伊利液奶奶科院开发并拥有版权。
+本软件及其相关文档（以下简称"软件"）的版权归伊利液奶奶科院所有。
 
-使用许可
-1. 本软件仅供伊利液奶奶科院内部使用。
-2. 未经伊利液奶奶科院书面许可，不得将本软件提供给第三方使用。
-3. 不得对本软件进行逆向工程、反编译或反汇编。
-4. 不得修改、复制、分发本软件的任何部分。
+使用许可条款：
 
-免责声明
-1. 本软件按"现状"提供，不提供任何明示或暗示的担保。
-2. 在任何情况下，伊利液奶奶科院均不对因使用本软件而产生的任何直接、间接、偶然、特殊或后果性损害承担责任。
+1. 软件授权
+   本软件专为牛群健康管理和DHI数据分析而设计。授权用户在遵守本协议条款的前提下使用本软件。
 
-技术支持
-如需技术支持，请联系伊利液奶奶科院技术部门。
+2. 使用范围
+   - 本软件仅供合法的牛群健康管理用途使用
+   - 禁止将软件用于任何非法或违规用途
+   - 禁止对软件进行逆向工程、反编译或反汇编
 
-本许可协议受中华人民共和国法律管辖。如有争议，应通过友好协商解决；协商不成的，应提交至伊利液奶奶科院所在地人民法院裁决。
+3. 技术支持
+   伊利液奶奶科院提供技术支持和软件更新服务。
 
-伊利液奶奶科院
-2025年 
+4. 免责声明
+   本软件按"现状"提供，不提供任何明示或暗示的担保，包括但不限于适销性、特定用途适用性的担保。
+
+5. 责任限制
+   在任何情况下，伊利液奶奶科院均不对因使用本软件而产生的任何直接、间接、特殊或后果性损害承担责任。
+
+6. 协议终止
+   如果用户违反本协议的任何条款，本许可将自动终止。
+
+7. 适用法律
+   本协议受中华人民共和国法律管辖。
+
+如您对本许可协议有任何疑问，请联系伊利液奶奶科院技术部。
+
+同意本协议即表示您已阅读、理解并同意受本协议条款的约束。
+
+---
+
+DHI Screening Analysis System v3.0 Software License Agreement
+
+Copyright (C) 2025 Yili Liquid Milk Research Institute
+
+All rights reserved. This software and related documentation (hereinafter referred to as "Software") are owned by Yili Liquid Milk Research Institute.
+
+By installing and using this software, you agree to be bound by the terms of this license agreement.
+
+For technical support, please contact Yili Liquid Milk Research Institute Technical Department. 

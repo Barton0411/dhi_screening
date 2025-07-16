@@ -1,10 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
-# DHI筛查分析系统 v3.0 - PyInstaller配置文件
+# DHI筛查分析系统 v3.3 - PyInstaller配置文件
 # 伊利液奶奶科院
 
 # 应用信息
-APP_NAME = 'DHI_Screening_System_v3.0'
-APP_VERSION = '3.0'
+APP_NAME = 'DHI_Screening_System_v3.3'
+APP_VERSION = '3.3'
 APP_DESCRIPTION = '伊利液奶奶科院 - DHI数据分析与乳房炎监测系统'
 
 # 分析配置

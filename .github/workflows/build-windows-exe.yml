@@ -39,10 +39,10 @@ jobs:
     - name: Build EXE with PyInstaller
       run: |
         Write-Host "🔨 开始构建Windows可执行文件..."
-        pyinstaller --clean --noconfirm "DHI_Screening_System_v3.0.spec"
+        pyinstaller --clean --noconfirm "DHI_Screening_System_v3.3.spec"
         
         # 验证构建结果
-        $exePath = "dist\DHI_Screening_System_v3.0\DHI_Screening_System_v3.0.exe"
+        $exePath = "dist\DHI_Screening_System_v3.3\DHI_Screening_System_v3.3.exe"
         if (Test-Path $exePath) {
           $fileSize = (Get-Item $exePath).Length / 1MB
           Write-Host "✅ EXE构建成功: $([math]::Round($fileSize, 2)) MB"
@@ -77,9 +77,9 @@ jobs:
         "; 支持Windows 7/8/10/11 (64位)" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
         "" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
         "#define MyAppNameChinese `"DHI筛查分析系统`"" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "#define MyAppVersion `"3.0`"" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
+        "#define MyAppVersion `"3.3`"" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
         "#define MyAppPublisher `"伊利液奶奶科院`"" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "#define MyAppExeName `"DHI_Screening_System_v3.0.exe`"" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
+        "#define MyAppExeName `"DHI_Screening_System_v3.3.exe`"" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
         "" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
         "[Setup]" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
         "AppId={{B6F5E7D4-8A2C-4F1B-9E3D-7A6C8B9D0E1F}" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
@@ -100,10 +100,10 @@ jobs:
         "SolidCompression=yes" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
         "WizardStyle=modern" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
         "" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "; 支持Windows 7及以上 (64位)" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
+        "; 支持Windows 7及以上 (32位和64位兼容)" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
         "MinVersion=6.1" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "ArchitecturesAllowed=x64" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "ArchitecturesInstallIn64BitMode=x64" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
+        "ArchitecturesAllowed=x86 x64" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
+        "; 注释掉ArchitecturesInstallIn64BitMode以支持32位系统兼容" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
         "" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
         "; 权限设置" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
         "PrivilegesRequired=admin" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
@@ -121,7 +121,7 @@ jobs:
         "" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
         "[Files]" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
         "; 主程序文件" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "Source: `"dist\DHI_Screening_System_v3.0\*`"; DestDir: `"{app}`"; Flags: ignoreversion recursesubdirs createallsubdirs" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
+        "Source: `"dist\DHI_Screening_System_v3.3\*`"; DestDir: `"{app}`"; Flags: ignoreversion recursesubdirs createallsubdirs" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
         "; 文档文件" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
         "Source: `"README.md`"; DestDir: `"{app}`"; Flags: ignoreversion" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
         "Source: `"LICENSE.txt`"; DestDir: `"{app}`"; Flags: ignoreversion skipifsourcedoesntexist" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
@@ -155,7 +155,7 @@ jobs:
           & $isccPath "DHI_Enhanced_Setup.iss"
           if ($LASTEXITCODE -eq 0) {
             Write-Host "✅ 安装包创建成功"
-            $installerPath = "installer\DHI_Screening_System_v3.0_Enhanced_Setup.exe"
+            $installerPath = "installer\DHI_Screening_System_v3.3_Enhanced_Setup.exe"
             if (Test-Path $installerPath) {
               $fileSize = (Get-Item $installerPath).Length / 1MB
               Write-Host "📦 安装包大小: $([math]::Round($fileSize, 2)) MB"

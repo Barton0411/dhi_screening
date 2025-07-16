@@ -11,14 +11,19 @@ APP_DESCRIPTION = '伊利液奶奶科院 - DHI数据分析与乳房炎监测系�
 a = Analysis(
     ['desktop_app.py'],
     pathex=[],
-    binaries=[],
+    binaries=[
+        # 确保包含Python运行时DLL
+    ],
     datas=[
         ('config.yaml', '.'),
         ('rules.yaml', '.'), 
         ('whg3r-qi1nv-001.ico', '.'),
         ('README.md', '.'),
         ('DHI_精准筛查助手-操作说明.md', '.'),
-        ('需求说明.md', '.')
+        ('需求说明.md', '.'),
+        ('mastitis_monitoring.py', '.'),
+        ('data_processor.py', '.'),
+        ('models.py', '.')
     ],
     hiddenimports=[
         # PyQt6 GUI库
@@ -62,10 +67,24 @@ a = Analysis(
         
         # 其他库
         'openpyxl',
+        'openpyxl.styles',
+        'openpyxl.styles.fills',
+        'openpyxl.styles.fonts', 
+        'openpyxl.styles.alignment',
+        'openpyxl.styles.borders',
+        'openpyxl.utils',
+        'openpyxl.utils.dataframe',
+        'openpyxl.workbook',
+        'openpyxl.worksheet',
         'yaml',
         'pyqtgraph',
         'pydantic',
         'dateutil',
+        
+        # 本地模块 (解决动态导入)
+        'mastitis_monitoring',
+        'data_processor',
+        'models',
         'logging',
         'threading',
         'datetime',
@@ -76,7 +95,34 @@ a = Analysis(
         'statistics',
         'hashlib',
         'uuid',
-        'typing_extensions'
+        'typing_extensions',
+        
+        # 系统和运行时库
+        'ctypes',
+        'ctypes.util',
+        'platform',
+        'subprocess',
+        'tempfile',
+        'shutil',
+        'zipfile',
+        'socket',
+        
+        # Excel处理引擎
+        'xlrd',
+        'xlrd.biffh',
+        'xlrd.book',
+        'xlrd.sheet',
+        
+        # PyQt6额外模块
+        'PyQt6.QtPrintSupport',
+        'PyQt6.sip',
+        
+        # 编码和本地化
+        'encodings',
+        'encodings.utf_8',
+        'encodings.cp1252',
+        'encodings.ascii',
+        'locale'
     ],
     hookspath=[],
     hooksconfig={},

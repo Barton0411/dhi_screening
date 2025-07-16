@@ -939,6 +939,7 @@ class MainWindow(QMainWindow):
         
         # 初始化筛选相关变量
         self.added_other_filters = {}  # 存储添加的其他筛选项
+        self.dhi_processed_ok = False  # 基础数据是否已处理完毕标志
         
         self.init_ui()
         self.load_config()
@@ -1391,7 +1392,7 @@ class MainWindow(QMainWindow):
         """初始化界面"""
         self.setWindowTitle("DHI数据分析与牛群健康监测系统 - 伊利液奶奶科院")
         
-        # 创建菜单栏
+        # 创建菜单栏 - 只创建一次
         self.create_menu_bar()
         
         # 自适应窗口大小 - 根据屏幕尺寸设置
@@ -1445,13 +1446,28 @@ class MainWindow(QMainWindow):
         content_splitter = QSplitter(Qt.Orientation.Horizontal)
         content_splitter.setContentsMargins(10, 10, 10, 10)
         
-        # 左侧控制面板 - 添加滚动区域
+        # ===========================================
+        # 左侧控制面板 - 平衡滚动策略
+        # ===========================================
+        # 经过UI优化后的最终方案：保留滚动功能但设置合理高度
+        # 
+        # 设计考虑：
+        # 1. 保留QScrollArea - 当内容过多时可以滚动，避免内容被截断
+        # 2. 设置600px最小高度 - 确保主要内容在首屏可见
+        # 3. 结合标签页内的顶部对齐设计，达到最佳用户体验
         left_scroll = QScrollArea()
-        left_scroll.setWidgetResizable(True)
-        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        left_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        left_scroll.setMinimumWidth(580)  # 增加最小宽度以确保内容显示完整
-        left_scroll.setMaximumWidth(800)  # 增加最大宽度允许更多调整空间
+        
+        # 滚动区域基本设置
+        left_scroll.setWidgetResizable(True)  # 内容自适应滚动区域大小
+        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)  # 禁用横向滚动
+        left_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)     # 按需显示纵向滚动
+        
+        # 宽度限制 - 确保在不同屏幕上的适配性
+        left_scroll.setMinimumWidth(580)  # 最小宽度580px - 保证内容完整显示
+        left_scroll.setMaximumWidth(800)  # 最大宽度800px - 避免在大屏幕上过度拉伸
+        
+        # 🎯 高度策略 - 平衡内容可见性和空间效率的关键设置
+        left_scroll.setMinimumHeight(400)  # 降低到400px - 避免文件上传区域过度拉伸
         
         left_panel = self.create_control_panel()
         left_scroll.setWidget(left_panel)
@@ -1961,7 +1977,22 @@ class MainWindow(QMainWindow):
         return steps_widget
     
     def create_card_widget(self, title):
-        """创建卡片样式的容器"""
+        """创建卡片样式的容器
+        
+        这是所有功能区域的统一容器组件，经过UI优化后采用紧凑设计：
+        
+        🎯 优化重点：
+        1. 标题栏padding: 10px → 4px (减少60%)
+        2. 标题栏margin: 10px → 4px (减少60%) 
+        3. 标题字体: 16px → 13px (减少19%)
+        4. 保持圆角和边框样式不变
+        
+        💡 设计理念：
+        - 在保持美观的前提下最大化空间利用率
+        - 所有卡片使用统一的紧凑样式
+        - 确保文字仍然清晰可读
+        """
+        # 创建卡片主容器
         card = QWidget()
         card.setStyleSheet("""
             QWidget {
@@ -1971,32 +2002,39 @@ class MainWindow(QMainWindow):
                 margin: 2px;
             }
         """)
+        # 设置卡片的大小策略 - 防止过度拉伸
+        from PyQt6.QtWidgets import QSizePolicy
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         
-        # 添加标题
+        # 卡片主布局 - 零边距零间距，最大化内容空间
         main_layout = QVBoxLayout(card)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
+        main_layout.setContentsMargins(0, 0, 0, 0)  # 去除所有外边距
+        main_layout.setSpacing(0)  # 去除所有间距
         
-        # 标题栏
+        # ===========================================
+        # 🎯 标题栏优化 - 空间效率提升的关键
+        # ===========================================
         title_widget = QWidget()
         title_widget.setStyleSheet("""
             QWidget {
                 background-color: #f8f9fa;
                 border-bottom: 1px solid #e0e0e0;
                 border-radius: 8px 8px 0 0;
-                padding: 10px 15px;
+                padding: 2px 4px;
             }
-        """)
-        title_layout = QHBoxLayout(title_widget)
-        title_layout.setContentsMargins(10, 10, 10, 10)
+        """)  # ✅ 进一步压缩padding到2px 4px
         
+        title_layout = QHBoxLayout(title_widget)
+        title_layout.setContentsMargins(2, 2, 2, 2)  # ✅ 进一步压缩margin到2px
+        
+        # 标题文字 - 字体优化
         title_label = QLabel(title)
         title_label.setStyleSheet("""
-            font-size: 16px;
+            font-size: 13px;
             font-weight: bold;
             color: #333;
             background: transparent;
-        """)
+        """)  # ✅ 字体从16px压缩到13px，保持加粗确保可读性
         title_layout.addWidget(title_label)
         title_layout.addStretch()
         
@@ -2018,6 +2056,7 @@ class MainWindow(QMainWindow):
         padding_v = self.get_dpi_scaled_size(8)
         padding_h = self.get_dpi_scaled_size(16)
         border_radius = self.get_dpi_scaled_size(5)
+        min_height = self.get_dpi_scaled_size(32)  # 统一按钮最小高度
         
         return {
             'primary': f"""
@@ -2028,6 +2067,7 @@ class MainWindow(QMainWindow):
                     border-radius: {border_radius}px;
                     padding: {padding_v}px {padding_h}px;
                     font-weight: bold;
+                    min-height: {min_height}px;
                 }}
                 QPushButton:hover {{
                     background-color: #0056b3;
@@ -2048,6 +2088,7 @@ class MainWindow(QMainWindow):
                     border-radius: {border_radius}px;
                     padding: {padding_v}px {padding_h}px;
                     font-weight: bold;
+                    min-height: {min_height}px;
                 }}
                 QPushButton:hover {{
                     background-color: #218838;
@@ -2068,6 +2109,7 @@ class MainWindow(QMainWindow):
                     border-radius: {border_radius}px;
                     padding: {padding_v}px {padding_h}px;
                     font-weight: bold;
+                    min-height: {min_height}px;
                 }}
                 QPushButton:hover {{
                     background-color: #e0a800;
@@ -2088,6 +2130,7 @@ class MainWindow(QMainWindow):
                     border-radius: {border_radius}px;
                     padding: {padding_v}px {padding_h}px;
                     font-weight: bold;
+                    min-height: {min_height}px;
                 }}
                 QPushButton:hover {{
                     background-color: #138496;
@@ -2108,6 +2151,7 @@ class MainWindow(QMainWindow):
                     border-radius: {border_radius}px;
                     padding: {padding_v}px {padding_h}px;
                     font-weight: bold;
+                    min-height: {min_height}px;
                 }}
                 QPushButton:hover {{
                     background-color: #5a6268;
@@ -2128,6 +2172,7 @@ class MainWindow(QMainWindow):
                     border-radius: {border_radius}px;
                     padding: {padding_v}px {padding_h}px;
                     font-weight: bold;
+                    min-height: {min_height}px;
                 }}
                 QPushButton:hover {{
                     background-color: #c82333;
@@ -2145,10 +2190,10 @@ class MainWindow(QMainWindow):
     def get_responsive_form_styles(self):
         """获取自适应表单样式 - 使用统一字体大小"""
         # 使用统一的DPI缩放方法
-        padding_v = self.get_dpi_scaled_size(8)  # 增加垂直内边距
-        padding_h = self.get_dpi_scaled_size(12)  # 增加水平内边距
+        padding_v = self.get_dpi_scaled_size(6)  # 减少垂直内边距
+        padding_h = self.get_dpi_scaled_size(12)  # 保持水平内边距
         border_radius = self.get_dpi_scaled_size(4)
-        min_height = self.get_dpi_scaled_size(32)  # 确保足够的最小高度
+        min_height = self.get_dpi_scaled_size(28)  # 统一输入框高度为28px
         
         return f"""
             QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit {{
@@ -2230,8 +2275,8 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(panel)
         
         # 自适应边距和间距 - 使用优化的DPI适配
-        margin = self.get_dpi_scaled_size(15)
-        spacing = self.get_dpi_scaled_size(15)
+        margin = self.get_dpi_scaled_size(8)
+        spacing = self.get_dpi_scaled_size(8)
         
         layout.setContentsMargins(margin, margin, margin, margin)
         layout.setSpacing(spacing)
@@ -2288,134 +2333,223 @@ class MainWindow(QMainWindow):
         return panel
 
     def create_basic_data_tab(self):
-        """创建基础数据标签页：文件上传 + 在群牛文件 + 基础筛选条件"""
+        """创建基础数据标签页：文件上传 + 在群牛文件 + 基础筛选条件
+        
+        这是主要的数据输入标签页，包含三个核心功能区域：
+        1. 📁 文件上传 - DHI Excel文件选择和处理
+        2. 🐄 在群牛文件 - 可选的在群牛数据文件
+        3. 🔧 基础筛选条件 - 胎次和日期范围设置
+        
+        布局策略：采用顶部对齐设计，所有内容紧贴上方排列，下方留空
+        这样用户打开标签页就能立即看到所有重要功能，无需滚动
+        """
+        # 创建标签页主容器
         tab_widget = QWidget()
         tab_layout = QVBoxLayout(tab_widget)
         
-        # 获取自适应样式
-        button_styles = self.get_responsive_button_styles()
-        form_styles = self.get_responsive_form_styles()
+        # 设置布局参数 - 极度紧凑
+        tab_layout.setSpacing(3)  # 组件间距：6px → 3px，进一步压缩
+        tab_layout.setContentsMargins(4, 4, 4, 4)  # 外边距：8px → 4px，最小化空间浪费
         
-        # 使用统一的边距
-        card_margin = self.get_dpi_scaled_size(12)
+        # 获取自适应样式 - 根据屏幕DPI自动调整
+        button_styles = self.get_responsive_button_styles()  # 按钮样式字典
+        form_styles = self.get_responsive_form_styles()      # 表单控件样式
         
-        # 1. 文件上传区域
-        upload_group = self.create_card_widget("📁 文件上传")
-        upload_layout = QVBoxLayout(getattr(upload_group, 'content_widget'))
-        upload_layout.setContentsMargins(card_margin, card_margin, card_margin, card_margin)
+        # 卡片内边距设置 - 平衡空间利用和内容可见性
+        card_margin = self.get_dpi_scaled_size(8)  # 8px边距，既紧凑又不压缩内容
         
-        # 文件选择按钮
-        self.upload_btn = QPushButton("📤 选择文件")
-        self.upload_btn.setStyleSheet(button_styles['primary'])
+        # ===========================================
+        # 1. 📁 DHI数据文件 - 超极简版本（无标题栏）
+        # ===========================================
+        # 直接创建容器，跳过create_card_widget以节省标题栏空间
+        upload_group = QWidget()
+        upload_group.setStyleSheet("""
+            QWidget {
+                background-color: white;
+                border: 1px solid #e0e0e0;
+                border-radius: 4px;
+            }
+        """)
+        # 设置文件上传区域的大小策略 - 防止过度拉伸
+        from PyQt6.QtWidgets import QSizePolicy
+        upload_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        upload_layout = QVBoxLayout(upload_group)
+        upload_layout.setContentsMargins(4, 4, 4, 4)  # 进一步压缩边距
+        upload_layout.setSpacing(1)  # 进一步压缩间距
+        
+        # 创建拖放上传区域 - 统一高度
+        drop_area = QWidget()
+        drop_area.setFixedHeight(self.get_dpi_scaled_size(32))  # 统一高度为32px
+        drop_area.setStyleSheet("""
+            QWidget {
+                border: 1px dashed #007bff;
+                border-radius: 4px;
+                background-color: #f8f9fa;
+                margin: 1px;
+            }
+            QWidget:hover {
+                background-color: #e9f4ff;
+                border-color: #0056b3;
+            }
+        """)
+        
+        # 拖放区域布局 - 紧凑设计
+        drop_layout = QHBoxLayout(drop_area)  # 改为水平布局，节省垂直空间
+        drop_layout.setContentsMargins(8, 4, 8, 4)
+        drop_layout.setSpacing(8)
+        
+        # 上传图标
+        upload_icon = QLabel("📤")
+        upload_icon.setStyleSheet("font-size: 18px; background: transparent; border: none;")
+        drop_layout.addWidget(upload_icon)
+        
+        # 文字信息（垂直布局）
+        text_widget = QWidget()
+        text_layout = QVBoxLayout(text_widget)
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(0)
+        
+        upload_text = QLabel("拖拽或点击选择DHI Excel文件")
+        upload_text.setStyleSheet("font-size: 11px; color: #6c757d; background: transparent; border: none;")
+        text_layout.addWidget(upload_text)
+        
+        format_hint = QLabel("支持 .xlsx, .xls 格式")
+        format_hint.setStyleSheet("font-size: 9px; color: #9ca3af; background: transparent; border: none;")
+        text_layout.addWidget(format_hint)
+        
+        drop_layout.addWidget(text_widget)
+        drop_layout.addStretch()
+        
+        upload_layout.addWidget(drop_area)
+        
+        # 选择文件按钮（作为备选方式）
+        self.upload_btn = QPushButton("📂 浏览文件")
+        self.upload_btn.setStyleSheet(button_styles['secondary'])
         self.upload_btn.clicked.connect(self.select_files)
+        # 移除最大高度限制，使用样式中的统一高度
         upload_layout.addWidget(self.upload_btn)
         
-        # 文件列表
-        self.file_list = QListWidget()
-        list_height = self.get_dpi_scaled_size(35)  # 调整为一行高度
-        self.file_list.setMaximumHeight(list_height)
+        # 已选文件显示区域 - 优化高度（仅在有文件时显示）
+        files_container = QWidget()
+        files_container.setMaximumHeight(self.get_dpi_scaled_size(30))  # 优化高度为30px
+        self.files_layout = QVBoxLayout(files_container)
+        self.files_layout.setContentsMargins(1, 1, 1, 1)  # 进一步压缩到1px
+        self.files_layout.setSpacing(0)  # 进一步压缩到0px
         
-        list_border_radius = self.get_dpi_scaled_size(4)
-        list_padding = self.get_dpi_scaled_size(5)
-        item_padding = self.get_dpi_scaled_size(5)
+        # 文件列表容器（用于动态添加文件标签）
+        self.file_list = QListWidget()  # 保持兼容性
+        self.file_list.setVisible(False)  # 隐藏传统列表
         
-        self.file_list.setStyleSheet(f"""
-            QListWidget {{
-                border: 1px solid #e0e0e0;
-                border-radius: {list_border_radius}px;
-                background-color: #f8f9fa;
-                padding: {list_padding}px;
-            }}
-            QListWidget::item {{
-                padding: {item_padding}px;
-                border-bottom: 1px solid #e0e0e0;
-            }}
-            QListWidget::item:selected {{
-                background-color: #007bff;
-                color: white;
-            }}
-        """)
-        upload_layout.addWidget(self.file_list)
+        # 文件标签容器
+        self.file_tags_widget = QWidget()
+        self.file_tags_layout = QVBoxLayout(self.file_tags_widget)
+        self.file_tags_layout.setContentsMargins(0, 0, 0, 0)
+        self.file_tags_layout.setSpacing(2)
+        
+        no_files_label = QLabel("尚未选择文件")
+        no_files_label.setStyleSheet("color: #9ca3af; font-size: 11px; font-style: italic;")
+        self.file_tags_layout.addWidget(no_files_label)
+        self.file_tags_layout.addStretch()
+        
+        self.files_layout.addWidget(self.file_tags_widget)
+        upload_layout.addWidget(files_container)
+        
+        # 操作按钮区域 - 极度压缩
+        buttons_container = QWidget()
+        buttons_layout = QHBoxLayout(buttons_container)
+        buttons_layout.setContentsMargins(0, 1, 0, 0)  # 进一步压缩到1px
+        buttons_layout.setSpacing(4)  # 进一步压缩到4px
         
         # 处理按钮
-        self.process_btn = QPushButton("⚙️ 处理文件")
-        self.process_btn.setStyleSheet(button_styles['success'])
+        self.process_btn = QPushButton("🚀 开始处理")
+        self.process_btn.setStyleSheet(button_styles['primary'])
         self.process_btn.clicked.connect(self.process_files)
         self.process_btn.setEnabled(False)
-        upload_layout.addWidget(self.process_btn)
+        # 移除最大高度限制，使用样式中的统一高度
+        buttons_layout.addWidget(self.process_btn)
         
-        # 进度条
+        # 清空按钮
+        clear_btn = QPushButton("🗑️ 清空")
+        clear_btn.setStyleSheet(button_styles['danger'])
+        clear_btn.clicked.connect(self.clear_files)
+        # 移除最大高度限制，使用样式中的统一高度
+        buttons_layout.addWidget(clear_btn)
+        
+        buttons_layout.addStretch()
+        upload_layout.addWidget(buttons_container)
+        
+        # 进度条 - 优化设计
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
-        
-        progress_border_radius = self.get_dpi_scaled_size(4)
-        progress_padding = self.get_dpi_scaled_size(2)
-        progress_chunk_radius = self.get_dpi_scaled_size(3)
-        min_height = self.get_dpi_scaled_size(20)
-        
-        self.progress_bar.setStyleSheet(f"""
-            QProgressBar {{
-                border: 1px solid #e0e0e0;
-                border-radius: {progress_border_radius}px;
+        self.progress_bar.setMaximumHeight(self.get_dpi_scaled_size(6))  # 优化高度为6px
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: none;
+                border-radius: 3px;
+                background-color: #e9ecef;
                 text-align: center;
-                padding: {progress_padding}px;
-                background-color: #f8f9fa;
-                min-height: {min_height}px;
-            }}
-            QProgressBar::chunk {{
+            }
+            QProgressBar::chunk {
                 background-color: #007bff;
-                border-radius: {progress_chunk_radius}px;
-            }}
+                border-radius: 3px;
+            }
         """)
         upload_layout.addWidget(self.progress_bar)
         
+        # 进度标签（隐藏）
         self.progress_label = QLabel("")
-        self.progress_label.setStyleSheet(f"color: #6c757d;")
-        upload_layout.addWidget(self.progress_label)
+        self.progress_label.setVisible(False)
         
         tab_layout.addWidget(upload_group)
         
-        # 2. 在群牛文件上传区域
+        # 2. 在群牛文件上传区域 - 简洁设计，与主上传区域保持一致
         active_cattle_group = self.create_card_widget("🐄 在群牛文件")
         active_cattle_layout = QVBoxLayout(getattr(active_cattle_group, 'content_widget'))
-        active_cattle_layout.setContentsMargins(card_margin, card_margin, card_margin, card_margin)
+        active_cattle_layout.setContentsMargins(0, 0, 0, 0)  # 移除双重边距
+        active_cattle_layout.setSpacing(6)  # 与主上传区域保持一致的间距
         
         # 在群牛文件选择按钮
         self.active_cattle_btn = QPushButton("📋 选择在群牛文件")
         self.active_cattle_btn.setStyleSheet(button_styles['secondary'])
         self.active_cattle_btn.clicked.connect(self.select_active_cattle_file)
+        # 移除最大高度限制，使用样式中的统一高度
         active_cattle_layout.addWidget(self.active_cattle_btn)
         
-        # 在群牛文件状态标签
-        self.active_cattle_label = QLabel("未上传在群牛文件")
-        self.active_cattle_label.setStyleSheet("color: #6c757d; font-size: 12px;")
-        active_cattle_layout.addWidget(self.active_cattle_label)
+        # 在群牛文件状态标签 - 隐藏状态显示
+        self.active_cattle_label = QLabel("")
+        self.active_cattle_label.setVisible(False)  # 隐藏状态显示
         
         # 清除在群牛按钮
         self.clear_active_cattle_btn = QPushButton("🗑️ 清除在群牛")
         self.clear_active_cattle_btn.setStyleSheet(button_styles['danger'])
         self.clear_active_cattle_btn.clicked.connect(self.clear_active_cattle)
         self.clear_active_cattle_btn.setVisible(False)
+        # 移除最大高度限制，使用样式中的统一高度
         active_cattle_layout.addWidget(self.clear_active_cattle_btn)
         
         tab_layout.addWidget(active_cattle_group)
         
-        # 3. 基础筛选条件区域
+        # 3. 基础筛选条件区域 - 简洁设计，统一边距策略
         basic_filter_group = self.create_card_widget("🔧 基础筛选条件")
         basic_filter_layout = QFormLayout(getattr(basic_filter_group, 'content_widget'))
-        basic_filter_layout.setContentsMargins(card_margin, card_margin, card_margin, card_margin)
+        basic_filter_layout.setContentsMargins(0, 4, 0, 4)  # 只保留上下4px的细微边距
+        basic_filter_layout.setVerticalSpacing(8)  # 适中的表单项间距
+        basic_filter_layout.setHorizontalSpacing(10)
         
         # 胎次范围筛选
         parity_layout = QHBoxLayout()
+        parity_layout.setSpacing(4)  # 减少间距
         self.parity_min = QSpinBox()
         self.parity_min.setRange(1, 99)
         self.parity_min.setValue(1)
         self.parity_min.setStyleSheet(form_styles)
+        # 移除最大高度限制，使用样式中的统一高度
         
         self.parity_max = QSpinBox()
         self.parity_max.setRange(1, 99)
         self.parity_max.setValue(99)
         self.parity_max.setStyleSheet(form_styles)
+        # 移除最大高度限制，使用样式中的统一高度
         
         parity_layout.addWidget(QLabel("从"))
         parity_layout.addWidget(self.parity_min)
@@ -2427,15 +2561,18 @@ class MainWindow(QMainWindow):
         
         # 日期范围筛选
         date_layout = QHBoxLayout()
+        date_layout.setSpacing(4)  # 减少间距
         self.date_start = QDateEdit()
         self.date_start.setCalendarPopup(True)
         self.date_start.setDate(QDate.currentDate().addMonths(-12))  # 默认一年前
         self.date_start.setStyleSheet(form_styles)
+        # 移除最大高度限制，使用样式中的统一高度
         
         self.date_end = QDateEdit()
         self.date_end.setCalendarPopup(True)
         self.date_end.setDate(QDate.currentDate())  # 默认今天
         self.date_end.setStyleSheet(form_styles)
+        # 移除最大高度限制，使用样式中的统一高度
         
         date_layout.addWidget(self.date_start)
         date_layout.addWidget(QLabel("至"))
@@ -2445,9 +2582,23 @@ class MainWindow(QMainWindow):
         
         tab_layout.addWidget(basic_filter_group)
         
-        # 添加弹性空间
-        tab_layout.addStretch()
+        # ===========================================
+        # 🎯 关键布局策略：顶部对齐设计
+        # ===========================================
+        # 这是界面优化的核心！addStretch()让所有内容紧贴上方排列
+        # 
+        # 效果说明：
+        # - 文件上传、在群牛文件、基础筛选条件都集中在顶部
+        # - 用户打开标签页立即看到所有重要功能，无需滚动
+        # - 下方留空不影响使用，符合现代界面设计习惯
+        # - 类似网页设计的顶部对齐布局
+        #
+        # 对比其他标签页：
+        # - 基础数据、隐性乳房炎监测：使用 addStretch() 完全顶部对齐
+        # - DHI筛选、慢性乳房炎：使用 addStretch(1) 适度分布
+        tab_layout.addStretch()  # 🚀 顶部对齐的关键代码 - 内容集中上方，下方留空
         
+        # 添加到标签页容器
         self.function_tabs.addTab(tab_widget, "📊 基础数据")
 
     def create_dhi_filter_tab(self):
@@ -2459,8 +2610,8 @@ class MainWindow(QMainWindow):
         button_styles = self.get_responsive_button_styles()
         form_styles = self.get_responsive_form_styles()
         
-        # 使用统一的边距
-        card_margin = self.get_dpi_scaled_size(12)
+        # 使用合理的边距，确保内容可见
+        card_margin = self.get_dpi_scaled_size(10)
         
         # 1. 蛋白率筛选
         protein_group = self.create_special_filter_group("🥛 蛋白率筛选", "protein")
@@ -2587,9 +2738,12 @@ class MainWindow(QMainWindow):
         
         # 动态调整的筛选项容器（无滚动条）
         self.filters_container = QWidget()
+        self.filters_container.setMinimumWidth(580)  # 进一步增加最小宽度
+        self.filters_container.setMinimumHeight(200)  # 设置最小高度确保足够显示空间
         self.other_filters_layout = QVBoxLayout(self.filters_container)
-        self.other_filters_layout.setContentsMargins(5, 5, 5, 5)
-        self.other_filters_layout.addStretch()
+        self.other_filters_layout.setContentsMargins(8, 8, 8, 8)
+        self.other_filters_layout.setSpacing(8)  # 增加组件间距
+        # 去掉addStretch，避免压缩筛选项
         
         # 直接添加容器，不使用滚动区域
         other_filters_layout.addWidget(self.filters_container)
@@ -2756,8 +2910,8 @@ class MainWindow(QMainWindow):
         
         tab_layout.addWidget(action_group)
         
-        # 添加弹性空间
-        tab_layout.addStretch()
+        # 添加适量弹性空间，保持布局平衡
+        tab_layout.addStretch(1)  # 恢复少量弹性空间，避免内容过度压缩
         
         self.function_tabs.addTab(tab_widget, "🔬 DHI基础筛选")
 
@@ -3006,8 +3160,8 @@ class MainWindow(QMainWindow):
         
         tab_layout.addWidget(action_group)
         
-        # 添加弹性空间
-        tab_layout.addStretch()
+        # 添加适量弹性空间，保持布局平衡
+        tab_layout.addStretch(1)  # 恢复少量弹性空间，避免内容过度压缩
         
         # 初始化变量
         self.current_mastitis_system = None
@@ -3027,7 +3181,8 @@ class MainWindow(QMainWindow):
             error_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             error_label.setStyleSheet("color: #dc3545; padding: 20px;")
             tab_layout.addWidget(error_label)
-            tab_layout.addStretch()
+            # 添加弹性空间，让内容紧贴上方
+            tab_layout.addStretch()  # 内容集中在上方显示，下方留空
             self.function_tabs.addTab(tab_widget, "👁️ 隐性乳房炎监测")
             return
 
@@ -3138,8 +3293,8 @@ class MainWindow(QMainWindow):
         config_card.layout().addWidget(self.monitoring_status_label)
         tab_layout.addWidget(config_card)
         
-        # 添加弹性空间
-        tab_layout.addStretch()
+        # 添加弹性空间，让内容紧贴上方
+        tab_layout.addStretch()  # 内容集中在上方显示，下方留空
         
         # 初始化监测计算器
         self.mastitis_monitoring_calculator = None
@@ -3148,29 +3303,9 @@ class MainWindow(QMainWindow):
         self.function_tabs.addTab(tab_widget, "👁️ 隐性乳房炎监测")
     
     def update_monitoring_data_status(self):
-        """更新隐性乳房炎监测的数据状态显示"""
-        status_lines = []
-        
-        # 检查牛群基础信息
-        if hasattr(self, 'cattle_basic_info') and self.cattle_basic_info is not None:
-            system_name = getattr(self, 'current_system', 'unknown')
-            system_display = {'yiqiniu': '伊起牛', 'huimuyun': '慧牧云', 'custom': '其他'}.get(system_name, system_name)
-            status_lines.append(f"✅ 牛群基础信息: {len(self.cattle_basic_info)}头牛 ({system_display}系统)")
-        else:
-            status_lines.append("❌ 牛群基础信息: 未上传 (请先到'慢性乳房炎筛查'中上传)")
-        
-        # 检查DHI数据（基于基础数据标签页的上传状态）
-        if hasattr(self, 'data_list') and self.data_list:
-            # 计算有效的数据文件数量
-            valid_files = [item for item in self.data_list if item.get('data') is not None and not item['data'].empty]
-            if valid_files:
-                status_lines.append(f"✅ DHI数据: 已上传{len(valid_files)}个文件 (来自基础数据)")
-            else:
-                status_lines.append("❌ DHI数据: 已上传但无有效数据")
-        else:
-            status_lines.append("❌ DHI数据: 未上传 (请到'DHI基础筛选'标签页上传)")
-        
-        self.monitoring_data_status.setText("\n".join(status_lines))
+        """更新隐性乳房炎监测的数据状态显示 - 取消所有状态显示"""
+        # 清空状态显示
+        self.monitoring_data_status.setText("")
     
     def get_mastitis_monitoring_formula_html(self):
         """获取隐性乳房炎监测公式说明HTML"""
@@ -3998,6 +4133,7 @@ class MainWindow(QMainWindow):
         )
         
         if files:
+            # 更新传统文件列表（保持兼容性）
             self.file_list.clear()
             self.selected_files = files
             
@@ -4006,8 +4142,91 @@ class MainWindow(QMainWindow):
                 item = QListWidgetItem(filename)
                 self.file_list.addItem(item)
             
+            # 更新新的文件标签显示
+            self.update_file_tags_display(files)
+            
             self.process_btn.setEnabled(True)
             self.safe_show_status_message(f"已选择 {len(files)} 个文件")
+    
+    def update_file_tags_display(self, files):
+        """更新文件标签显示"""
+        if not hasattr(self, 'file_tags_layout'):
+            return
+        
+        # 清除所有现有的文件标签
+        for i in reversed(range(self.file_tags_layout.count())):
+            item = self.file_tags_layout.itemAt(i)
+            if item:
+                widget = item.widget()
+                if widget:
+                    widget.setParent(None)
+        
+        # 为每个文件创建标签
+        for file_path in files:
+            filename = os.path.basename(file_path)
+            file_tag = self.create_file_tag(filename)
+            self.file_tags_layout.addWidget(file_tag)
+        
+        # 添加弹性空间
+        self.file_tags_layout.addStretch()
+    
+    def create_file_tag(self, filename):
+        """创建文件标签"""
+        tag_widget = QWidget()
+        tag_widget.setMaximumHeight(self.get_dpi_scaled_size(24))  # 优化高度为24px
+        tag_widget.setStyleSheet("""
+            QWidget {
+                background-color: #e9f4ff;
+                border: 1px solid #007bff;
+                border-radius: 10px;
+                margin: 1px;
+            }
+        """)
+        
+        tag_layout = QHBoxLayout(tag_widget)
+        tag_layout.setContentsMargins(8, 2, 8, 2)
+        tag_layout.setSpacing(4)
+        
+        # 文件图标
+        file_icon = QLabel("📄")
+        file_icon.setStyleSheet("background: transparent; border: none; font-size: 10px;")
+        tag_layout.addWidget(file_icon)
+        
+        # 文件名
+        file_label = QLabel(filename)
+        file_label.setStyleSheet("background: transparent; border: none; font-size: 10px; color: #0056b3;")
+        tag_layout.addWidget(file_label)
+        
+        tag_layout.addStretch()
+        
+        return tag_widget
+    
+    def clear_files(self):
+        """清空已选择的文件"""
+        if hasattr(self, 'file_list'):
+            self.file_list.clear()
+        
+        # 清空文件标签显示
+        if hasattr(self, 'file_tags_layout'):
+            # 清除所有现有的文件标签
+            for i in reversed(range(self.file_tags_layout.count())):
+                item = self.file_tags_layout.itemAt(i)
+                if item:
+                    widget = item.widget()
+                    if widget:
+                        widget.setParent(None)
+            
+            # 恢复"尚未选择文件"提示
+            no_files_label = QLabel("尚未选择文件")
+            no_files_label.setStyleSheet("color: #9ca3af; font-size: 11px; font-style: italic;")
+            self.file_tags_layout.addWidget(no_files_label)
+            self.file_tags_layout.addStretch()
+        
+        # 重置状态
+        self.selected_files = []
+        self.process_btn.setEnabled(False)
+        self.progress_bar.setVisible(False)
+        self.safe_show_status_message("已清空所有文件")
     
     def process_files(self):
         """处理文件"""
@@ -4032,7 +4251,7 @@ class MainWindow(QMainWindow):
     
     def update_progress(self, status, progress):
         """更新进度"""
-        self.progress_label.setText(status)
+        # 不更新progress_label，只更新进度条和状态栏
         self.progress_bar.setValue(progress)
         self.statusBar().showMessage(status)
     
@@ -4076,17 +4295,21 @@ class MainWindow(QMainWindow):
         # 保存数据
         self.data_list = results['all_data']
         
+        # 处理成功后设置标志
+        self.dhi_processed_ok = True if self.data_list else False
+        
         # 计算总牛头数并更新分析面板
         total_cows = set()
         all_data_combined = []
         
         for item in self.data_list:
             df = item['data']
-            all_data_combined.append(df)
-            if 'management_id' in df.columns:
-                cow_ids = df['management_id'].dropna().unique()
-                for cow_id in cow_ids:
-                    total_cows.add(cow_id)
+            if df is not None and not df.empty:
+                all_data_combined.append(df)
+                if 'management_id' in df.columns:
+                    cow_ids = df['management_id'].dropna().unique()
+                    for cow_id in cow_ids:
+                        total_cows.add(cow_id)
         
         # 合并所有数据用于分析
         if all_data_combined:
@@ -4102,8 +4325,8 @@ class MainWindow(QMainWindow):
         self.detect_and_display_duplicates()
         
         # 显示处理结果
-        success_count = len(results['success_files'])
-        failed_count = len(results['failed_files'])
+        success_count = len(results.get('success_files', []))
+        failed_count = len(results.get('failed_files', []))
         summary = f"\n📊 处理完成！\n"
         summary += f"成功: {success_count} 个文件\n"
         summary += f"失败: {failed_count} 个文件\n\n"
@@ -4540,7 +4763,7 @@ class MainWindow(QMainWindow):
                 'min': self.protein_min.value(),
                 'max': self.protein_max.value(),
                 'min_match_months': self.protein_months.value(),
-                'treat_empty_as_match': self.protein_empty.isChecked()
+                'empty_handling': self.protein_empty.currentText()
             }
         
         # 体细胞数筛选（新的独立筛选项）
@@ -4551,7 +4774,7 @@ class MainWindow(QMainWindow):
                 'min': self.somatic_min.value(),
                 'max': self.somatic_max.value(),
                 'min_match_months': self.somatic_months.value(),
-                'treat_empty_as_match': self.somatic_empty.isChecked()
+                'empty_handling': self.somatic_empty.currentText()
             }
         
         # 其他筛选项
@@ -4563,8 +4786,8 @@ class MainWindow(QMainWindow):
                     'min': widget.range_min.value(),
                     'max': widget.range_max.value(),
                     'min_match_months': widget.months_spinbox.value(),
-                    'treat_empty_as_match': widget.empty_checkbox.isChecked()
-        }
+                    'empty_handling': widget.empty_combo.currentText()
+                }
         
         # 未来泌乳天数 - 根据复选框状态决定是否启用（如果控件存在）
         if hasattr(self, 'future_days_enabled') and hasattr(self, 'plan_date'):
@@ -5614,49 +5837,31 @@ class MainWindow(QMainWindow):
         months_widget.setLayout(months_layout)
         layout.addWidget(months_widget)
         
-        # 空值处理选项
-        empty_checkbox = QCheckBox(f"将{title}数据为空的判断为符合")
-        empty_checkbox.setChecked(False)
-        empty_checkbox.setToolTip(f"勾选后，如果某月{title}数据为空，将视为符合筛选条件")
-        empty_checkbox.setStyleSheet(f"""
-            QCheckBox {{
-                font-size: {checkbox_font_size}px;
-                color: #495057;
-                spacing: {checkbox_spacing}px;
-            }}
-            QCheckBox::indicator {{
-                width: {checkbox_size}px;
-                height: {checkbox_size}px;
-                border: 2px solid #ced4da;
-                border-radius: {checkbox_border_radius}px;
-                background-color: white;
-            }}
-            QCheckBox::indicator:hover {{
-                border-color: #80bdff;
-                background-color: #f8f9fa;
-            }}
-            QCheckBox::indicator:checked {{
-                background-color: #007bff !important;
-                border-color: #007bff !important;
-                image: url(data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIiIGhlaWdodD0iOSIgdmlld0JveD0iMCAwIDEyIDkiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxwYXRoIGQ9Ik0xIDQuNUw0LjUgOEwxMSAxIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgo8L3N2Zz4K);
-            }}
-            QCheckBox::indicator:checked:hover {{
-                background-color: #0056b3 !important;
-                border-color: #0056b3 !important;
-            }}
-            QCheckBox::indicator:checked:pressed {{
-                background-color: #004085 !important;
-                border-color: #004085 !important;
-            }}
-        """)
-        layout.addWidget(empty_checkbox)
+        # 空值处理策略选择
+        empty_layout = QHBoxLayout()
+        empty_label = QLabel(f"{title}空值处理策略:")
+        empty_label.setStyleSheet("color: #495057; font-weight: bold;")
+        
+        empty_combo = QComboBox()
+        empty_combo.addItems(["视为不符合", "视为符合", "历史数据填充"])
+        empty_combo.setCurrentText("视为不符合")  # 默认选择
+        empty_combo.setStyleSheet(form_styles)
+        empty_combo.setToolTip(f"选择{title}数据为空时的处理方式")
+        
+        empty_layout.addWidget(empty_label)
+        empty_layout.addWidget(empty_combo)
+        empty_layout.addStretch()
+        
+        empty_widget = QWidget()
+        empty_widget.setLayout(empty_layout)
+        layout.addWidget(empty_widget)
         
         # 控制组件启用状态
         def toggle_filter_controls():
             enabled = filter_enabled.isChecked()
             range_widget.setEnabled(enabled)
             months_widget.setEnabled(enabled)
-            empty_checkbox.setEnabled(enabled)
+            empty_widget.setEnabled(enabled)
         
         filter_enabled.toggled.connect(toggle_filter_controls)
         toggle_filter_controls()  # 初始化状态
@@ -5667,13 +5872,13 @@ class MainWindow(QMainWindow):
             self.protein_min = range_min
             self.protein_max = range_max
             self.protein_months = months_spinbox
-            self.protein_empty = empty_checkbox
+            self.protein_empty = empty_combo
         elif filter_type == "somatic":
             self.somatic_enabled = filter_enabled
             self.somatic_min = range_min
             self.somatic_max = range_max
             self.somatic_months = months_spinbox
-            self.somatic_empty = empty_checkbox
+            self.somatic_empty = empty_combo
         
         return group
     
@@ -5790,12 +5995,9 @@ class MainWindow(QMainWindow):
             padding = 20       # 上下边距
             total_height = filter_count * item_height + padding
             
-            # 设置最大高度限制（避免过高）
-            max_allowed_height = 600
-            actual_height = min(total_height, max_allowed_height)
-            
-            self.filters_container.setMinimumHeight(actual_height)
-            self.filters_container.setMaximumHeight(actual_height)
+            # 只设置最小高度，最大高度不限制，让容器自动扩展
+            self.filters_container.setMinimumHeight(total_height)
+            self.filters_container.setMaximumHeight(16777215)  # 设置为最大值，不限制高度
         
         # 强制重新布局
         self.filters_container.updateGeometry()
@@ -5811,14 +6013,19 @@ class MainWindow(QMainWindow):
         """创建其他筛选项的界面组件"""
         chinese_name = filter_config.get("chinese_name", filter_key)
         
+        # 获取form_styles
+        form_styles = self.get_responsive_form_styles()
+        
         # 主容器
         widget = QWidget()
+        widget.setMinimumWidth(550)  # 增加最小宽度确保内容显示完整
+        widget.setMinimumHeight(140)  # 设置最小高度确保足够空间
         widget.setStyleSheet("""
             QWidget {
                 border: 1px solid #dee2e6;
                 border-radius: 6px;
-                padding: 8px;
-                margin: 2px;
+                padding: 10px;
+                margin: 4px;
                 background-color: #f8f9fa;
             }
         """)
@@ -5942,45 +6149,21 @@ class MainWindow(QMainWindow):
         default_months = min(3, max_months // 2) if max_months > 0 else 1
         months_spinbox.setValue(filter_config.get("min_match_months", default_months))
         
-        empty_checkbox = QCheckBox("空值判断为符合")
-        empty_checkbox.setChecked(filter_config.get("treat_empty_as_match", False))
-        
-        # 为空值复选框设置同样的改进样式
-        empty_checkbox.setStyleSheet(f"""
-            QCheckBox {{
-                font-size: {checkbox_font_size}px;
-                color: #495057;
-                spacing: {checkbox_spacing}px;
-            }}
-            QCheckBox::indicator {{
-                width: {checkbox_size}px;
-                height: {checkbox_size}px;
-                border: 2px solid #ced4da;
-                border-radius: {checkbox_border_radius}px;
-                background-color: white;
-            }}
-            QCheckBox::indicator:hover {{
-                border-color: #80bdff;
-                background-color: #f8f9fa;
-            }}
-            QCheckBox::indicator:checked {{
-                background-color: #007bff !important;
-                border-color: #007bff !important;
-                image: url(data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIiIGhlaWdodD0iOSIgdmlld0JveD0iMCAwIDEyIDkiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxwYXRoIGQ9Ik0xIDQuNUw0LjUgOEwxMSAxIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgo8L3N2Zz4K);
-            }}
-            QCheckBox::indicator:checked:hover {{
-                background-color: #0056b3 !important;
-                border-color: #0056b3 !important;
-            }}
-            QCheckBox::indicator:checked:pressed {{
-                background-color: #004085 !important;
-                border-color: #004085 !important;
-            }}
-        """)
+        # 空值处理策略下拉选择
+        empty_combo = QComboBox()
+        empty_combo.addItems(["视为不符合", "视为符合", "历史数据填充"])
+        # 根据配置设置默认值
+        if filter_config.get("treat_empty_as_match", False):
+            empty_combo.setCurrentText("视为符合")
+        else:
+            empty_combo.setCurrentText("视为不符合")
+        empty_combo.setStyleSheet(form_styles)
+        empty_combo.setToolTip("选择数据为空时的处理方式")
         
         options_layout.addWidget(QLabel("最少符合月数:"))
         options_layout.addWidget(months_spinbox)
-        options_layout.addWidget(empty_checkbox)
+        options_layout.addWidget(QLabel("空值处理:"))
+        options_layout.addWidget(empty_combo)
         options_layout.addStretch()
         
         layout.addLayout(options_layout)
@@ -6005,7 +6188,7 @@ class MainWindow(QMainWindow):
         widget.range_min = range_min
         widget.range_max = range_max
         widget.months_spinbox = months_spinbox
-        widget.empty_checkbox = empty_checkbox
+        widget.empty_combo = empty_combo
         widget.filter_key = filter_key
         widget.chinese_name = chinese_name
         

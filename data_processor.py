@@ -725,32 +725,89 @@ class DataProcessor:
         """应用数值筛选"""
         min_val = filter_config.get('min')
         max_val = filter_config.get('max')
-        include_null_as_match = filter_config.get('include_null_as_match', False)
+        empty_handling = filter_config.get('empty_handling', '视为不符合')
         
         # 如果字段不存在，直接返回
         if field not in df.columns:
             return df
         
+        # 处理空值填充
+        if empty_handling == '历史数据填充':
+            df = self._fill_empty_values_with_history(df, field)
+        
         # 创建筛选条件
         condition = pd.Series([True] * len(df), index=df.index)
         
         if min_val is not None:
-            if include_null_as_match:
+            if empty_handling == '视为符合':
                 # 空值被视为符合条件，或者数值大于等于最小值
                 condition = condition & ((df[field] >= min_val) | df[field].isna())
-            else:
+            elif empty_handling == '视为不符合':
                 # 只有数值大于等于最小值才符合条件（空值不符合）
+                condition = condition & (df[field] >= min_val)
+            else:  # 历史数据填充
+                # 已经填充过了，直接应用数值条件
                 condition = condition & (df[field] >= min_val)
         
         if max_val is not None:
-            if include_null_as_match:
+            if empty_handling == '视为符合':
                 # 空值被视为符合条件，或者数值小于等于最大值
                 condition = condition & ((df[field] <= max_val) | df[field].isna())
-            else:
+            elif empty_handling == '视为不符合':
                 # 只有数值小于等于最大值才符合条件（空值不符合）
+                condition = condition & (df[field] <= max_val)
+            else:  # 历史数据填充
+                # 已经填充过了，直接应用数值条件
                 condition = condition & (df[field] <= max_val)
         
         return df[condition]
+    
+    def _fill_empty_values_with_history(self, df: pd.DataFrame, field: str) -> pd.DataFrame:
+        """使用历史数据填充空值，并标记填充的值"""
+        if 'management_id' not in df.columns or 'sample_date' not in df.columns:
+            logger.warning(f"缺少management_id或sample_date列，无法进行历史数据填充")
+            return df
+        
+        df_copy = df.copy()
+        
+        # 确保sample_date是datetime类型
+        df_copy['sample_date'] = pd.to_datetime(df_copy['sample_date'], errors='coerce')
+        
+        # 记录原始空值位置
+        original_null_mask = df_copy[field].isna()
+        
+        # 按牛只分组进行填充
+        def fill_cow_data(group):
+            # 按日期排序
+            group = group.sort_values('sample_date')
+            # 记录填充前的空值位置
+            null_before = group[field].isna()
+            # 前向填充，然后后向填充
+            group[field] = group[field].ffill().bfill()
+            # 记录填充后的空值位置
+            null_after = group[field].isna()
+            # 标记被填充的值（原来是空的，现在不是空的）
+            filled_mask = null_before & ~null_after
+            
+            # 为历史填充的值添加标记
+            if f'{field}_historical_filled' not in group.columns:
+                group[f'{field}_historical_filled'] = False
+            group.loc[filled_mask, f'{field}_historical_filled'] = True
+            
+            return group
+        
+        try:
+            filled_df = df_copy.groupby('management_id', group_keys=False).apply(fill_cow_data)
+            
+            # 统计填充数量
+            if f'{field}_historical_filled' in filled_df.columns:
+                filled_count = filled_df[f'{field}_historical_filled'].sum()
+                logger.info(f"已对字段{field}进行历史数据填充，共填充{filled_count}个空值")
+            
+            return filled_df
+        except Exception as e:
+            logger.error(f"历史数据填充失败: {e}")
+            return df
     
     def _apply_parity_filter(self, df: pd.DataFrame, filter_config: Dict) -> pd.DataFrame:
         """应用胎次筛选 - 特殊逻辑：只保留指定胎次范围内的数据"""

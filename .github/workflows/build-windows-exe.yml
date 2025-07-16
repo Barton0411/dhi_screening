@@ -1,11 +1,11 @@
-name: Build Windows EXE (Enhanced Compatibility)
+name: Build Windows EXE and Upload to OneDrive
 
 on:
   push:
     branches: [ main ]
   pull_request:
     branches: [ main ]
-  workflow_dispatch:  # 允许手动触发
+  workflow_dispatch:
 
 jobs:
   build-windows-exe:
@@ -21,27 +21,18 @@ jobs:
         python-version: '3.11'
         architecture: 'x64'
     
-    - name: Install dependencies with error handling
+    - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        # 安装依赖时添加错误处理
-        try {
-          pip install pyinstaller
-          pip install -r requirements.txt
-          Write-Host "✅ 依赖安装成功"
-        } catch {
-          Write-Host "❌ 依赖安装失败: $($_.Exception.Message)"
-          Write-Host "🔄 尝试使用备用方法安装..."
-          pip install --upgrade pip setuptools wheel
-          pip install --only-binary=all -r requirements.txt
-        }
+        pip install pyinstaller
+        pip install -r requirements.txt
+        Write-Host "✅ 依赖安装成功"
     
     - name: Build EXE with PyInstaller
       run: |
         Write-Host "🔨 开始构建Windows可执行文件..."
         pyinstaller --clean --noconfirm "DHI_Screening_System_v3.3.spec"
         
-        # 验证构建结果
         $exePath = "dist\DHI_Screening_System_v3.3\DHI_Screening_System_v3.3.exe"
         if (Test-Path $exePath) {
           $fileSize = (Get-Item $exePath).Length / 1MB
@@ -51,259 +42,120 @@ jobs:
           exit 1
         }
     
-    - name: Install Inno Setup
+    - name: Prepare upload package
       run: |
-        Write-Host "📥 下载并安装Inno Setup..."
-        $url = "https://files.jrsoftware.org/is/6/innosetup-6.2.2.exe"
-        $output = "innosetup-installer.exe"
-        try {
-          Invoke-WebRequest -Uri $url -OutFile $output
-          Start-Process -FilePath $output -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
-          $env:PATH += ";C:\Program Files (x86)\Inno Setup 6"
-          echo "C:\Program Files (x86)\Inno Setup 6" >> $env:GITHUB_PATH
-          Write-Host "✅ Inno Setup安装成功"
-        } catch {
-          Write-Host "❌ Inno Setup安装失败: $($_.Exception.Message)"
+        Write-Host "📦 准备上传包..."
+        
+        $uploadDir = "upload_package"
+        if (Test-Path $uploadDir) {
+          Remove-Item -Recurse -Force $uploadDir
+        }
+        New-Item -ItemType Directory -Path $uploadDir
+        
+        $distDir = "dist\DHI_Screening_System_v3.3"
+        if (Test-Path $distDir) {
+          Copy-Item -Path "$distDir\*" -Destination $uploadDir -Recurse
+          Write-Host "✅ EXE文件已复制到上传目录"
+        }
+        
+        $docFiles = @("README.md", "LICENSE.txt", "CHANGELOG.md", "whg3r-qi1nv-001.ico")
+        foreach ($file in $docFiles) {
+          if (Test-Path $file) {
+            Copy-Item -Path $file -Destination $uploadDir
+            Write-Host "✅ 已复制: $file"
+          }
+        }
+        
+        $buildTime = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+        $versionContent = "DHI精准筛查助手 v3.3`n构建时间: $buildTime`n构建分支: $env:GITHUB_REF_NAME`n提交哈希: $env:GITHUB_SHA`n构建号: $env:GITHUB_RUN_NUMBER`n`n系统要求:`n- Windows 7/8/10/11 (32位或64位)`n- 内存: 4GB RAM 推荐`n- 硬盘: 100MB 可用空间`n`n使用说明:`n1. 直接运行 DHI_Screening_System_v3.3.exe`n2. 首次使用请参考 README.md`n3. 如有问题请查看 CHANGELOG.md`n`n技术支持: 伊利液奶奶科院"
+        
+        $versionContent | Out-File -FilePath "$uploadDir\version_info.txt" -Encoding UTF8
+        
+        Write-Host "📋 上传包内容:"
+        Get-ChildItem $uploadDir | Format-Table Name, Length, LastWriteTime
+        
+        $totalSize = (Get-ChildItem $uploadDir -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB
+        Write-Host "📊 上传包总大小: $([math]::Round($totalSize, 2)) MB"
+    
+    - name: Install rclone
+      run: |
+        Write-Host "📥 安装rclone..."
+        $rcloneUrl = "https://downloads.rclone.org/rclone-current-windows-amd64.zip"
+        $rcloneZip = "rclone.zip"
+        
+        Invoke-WebRequest -Uri $rcloneUrl -OutFile $rcloneZip
+        Expand-Archive -Path $rcloneZip -DestinationPath "." -Force
+        
+        $rcloneExe = Get-ChildItem -Path ".\rclone-*" -Name "rclone.exe" -Recurse | Select-Object -First 1
+        if ($rcloneExe) {
+          Copy-Item -Path $rcloneExe.FullName -Destination ".\rclone.exe"
+          Write-Host "✅ rclone安装成功"
+        } else {
+          Write-Host "❌ rclone安装失败"
           exit 1
         }
-        
-    - name: Create Enhanced Installer Script
+    
+    - name: Configure OneDrive and Upload
+      env:
+        ONEDRIVE_TOKEN: ${{ secrets.ONEDRIVE_TOKEN }}
       run: |
-        Write-Host "📝 创建增强兼容性安装脚本..."
+        Write-Host "☁️ 配置OneDrive连接..."
         
-        # 创建安装脚本内容
-        "; DHI筛查分析系统 v3.0 - 增强兼容性安装程序" | Out-File "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "; 伊利液奶奶科院" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "; 支持Windows 7/8/10/11 (64位)" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "#define MyAppNameChinese `"DHI筛查分析系统`"" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "#define MyAppVersion `"3.3`"" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "#define MyAppPublisher `"伊利液奶奶科院`"" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "#define MyAppExeName `"DHI_Screening_System_v3.3.exe`"" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "[Setup]" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "AppId={{B6F5E7D4-8A2C-4F1B-9E3D-7A6C8B9D0E1F}" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "AppName={#MyAppNameChinese}" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "AppVersion={#MyAppVersion}" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "AppVerName={#MyAppNameChinese} v{#MyAppVersion}" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "AppPublisher={#MyAppPublisher}" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "AppCopyright=Copyright (C) 2025 {#MyAppPublisher}" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "; 增强兼容性设置" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "DefaultDirName={autopf}\{#MyAppNameChinese}" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "DefaultGroupName={#MyAppNameChinese}" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "AllowNoIcons=yes" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "OutputDir=installer" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "OutputBaseFilename=DHI_Screening_System_v{#MyAppVersion}_Enhanced_Setup" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "SetupIconFile=whg3r-qi1nv-001.ico" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "Compression=lzma" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "SolidCompression=yes" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "WizardStyle=modern" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "; 支持Windows 7及以上 (32位和64位兼容)" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "MinVersion=6.1" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "ArchitecturesAllowed=x86 x64" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "; 注释掉ArchitecturesInstallIn64BitMode以支持32位系统兼容" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "; 权限设置" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "PrivilegesRequired=admin" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "PrivilegesRequiredOverridesAllowed=commandline" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "; 卸载设置" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "UninstallDisplayIcon={app}\{#MyAppExeName}" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "UninstallDisplayName={#MyAppNameChinese} v{#MyAppVersion}" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "[Languages]" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "Name: `"english`"; MessagesFile: `"compiler:Default.isl`"" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "[Tasks]" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "Name: `"desktopicon`"; Description: `"{cm:CreateDesktopIcon}`"; GroupDescription: `"{cm:AdditionalIcons}`"; Flags: unchecked" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "[Files]" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "; 主程序文件" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "Source: `"dist\DHI_Screening_System_v3.3\*`"; DestDir: `"{app}`"; Flags: ignoreversion recursesubdirs createallsubdirs" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "; 文档文件" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "Source: `"README.md`"; DestDir: `"{app}`"; Flags: ignoreversion" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "Source: `"LICENSE.txt`"; DestDir: `"{app}`"; Flags: ignoreversion skipifsourcedoesntexist" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "Source: `"whg3r-qi1nv-001.ico`"; DestDir: `"{app}`"; Flags: ignoreversion" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "[Icons]" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "; 开始菜单" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "Name: `"{group}\{#MyAppNameChinese}`"; Filename: `"{app}\{#MyAppExeName}`"; IconFilename: `"{app}\whg3r-qi1nv-001.ico`"" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "Name: `"{group}\操作说明`"; Filename: `"{app}\README.md`"" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "Name: `"{group}\卸载 {#MyAppNameChinese}`"; Filename: `"{uninstallexe}`"" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "; 桌面快捷方式" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "Name: `"{autodesktop}\{#MyAppNameChinese}`"; Filename: `"{app}\{#MyAppExeName}`"; IconFilename: `"{app}\whg3r-qi1nv-001.ico`"; Tasks: desktopicon" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "[Run]" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "; 安装完成后运行选项" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        "Filename: `"{app}\{#MyAppExeName}`"; Description: `"{cm:LaunchProgram,{#StringChange(MyAppNameChinese, '&', '&&')}}`"; Flags: nowait postinstall skipifsilent" | Add-Content "DHI_Enhanced_Setup.iss" -Encoding UTF8
-        
-        Write-Host "✅ 安装脚本创建完成"
-        
-    - name: Create Enhanced Installer
-      run: |
-        if (-not (Test-Path "installer")) {
-          New-Item -ItemType Directory -Path "installer"
+        if (-not $env:ONEDRIVE_TOKEN) {
+          Write-Host "⚠️ 未配置OneDrive token，跳过上传"
+          Write-Host "📝 请在GitHub仓库设置中添加 ONEDRIVE_TOKEN secret"
+          exit 0
         }
         
-        $isccPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-        Write-Host "🔨 创建增强兼容性安装包..."
+        $rcloneConfig = "[onedrive]`ntype = onedrive`ntoken = $env:ONEDRIVE_TOKEN`ndrive_id = `ndrive_type = personal"
+        
+        $configDir = "$env:APPDATA\rclone"
+        if (-not (Test-Path $configDir)) {
+          New-Item -ItemType Directory -Path $configDir -Force
+        }
+        
+        $rcloneConfig | Out-File -FilePath "$configDir\rclone.conf" -Encoding UTF8
+        
+        $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+        $remotePath = "DHI_Screening_System/releases/v3.3_$timestamp"
+        
+        Write-Host "📤 开始上传到OneDrive: $remotePath"
         
         try {
-          & $isccPath "DHI_Enhanced_Setup.iss"
+          .\rclone.exe copy "upload_package" "onedrive:$remotePath" --progress --verbose
+          
           if ($LASTEXITCODE -eq 0) {
-            Write-Host "✅ 安装包创建成功"
-            $installerPath = "installer\DHI_Screening_System_v3.3_Enhanced_Setup.exe"
-            if (Test-Path $installerPath) {
-              $fileSize = (Get-Item $installerPath).Length / 1MB
-              Write-Host "📦 安装包大小: $([math]::Round($fileSize, 2)) MB"
-            }
+            Write-Host "✅ 上传成功!"
+            Write-Host "📂 OneDrive路径: $remotePath"
+            
+            Write-Host "📋 已上传的文件:"
+            .\rclone.exe ls "onedrive:$remotePath"
           } else {
-            throw "Inno Setup编译失败，退出代码: $LASTEXITCODE"
+            Write-Host "❌ 上传失败，错误代码: $LASTEXITCODE"
+            exit 1
           }
         } catch {
-          Write-Host "❌ 安装包创建失败: $($_.Exception.Message)"
+          Write-Host "❌ 上传出错: $_"
           exit 1
         }
-        
-    - name: Create Portable Version
+    
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: DHI-EXE-v3.3-${{ github.run_number }}
+        path: upload_package/
+        retention-days: 30
+    
+    - name: Create release summary
+      if: success()
       run: |
-        Write-Host "📦 创建便携版本..."
-        
-        if (-not (Test-Path "release")) {
-          New-Item -ItemType Directory -Path "release"
-        }
-        
-        # 复制程序文件
-        xcopy "dist\DHI_Screening_System_v3.0" "release\DHI_Screening_System_v3.0_Portable" /E /I /Y
-        
-        # 复制文档
-        xcopy "README.md" "release\" /Y
-        xcopy "LICENSE.txt" "release\" /Y
-        
-        # 创建便携版说明
-        "# DHI筛查分析系统 v3.0 - 便携版" | Out-File "release\便携版说明.txt" -Encoding UTF8
-        "" | Add-Content "release\便携版说明.txt" -Encoding UTF8
-        "## 使用说明" | Add-Content "release\便携版说明.txt" -Encoding UTF8
-        "1. 解压到任意目录" | Add-Content "release\便携版说明.txt" -Encoding UTF8
-        "2. 运行 DHI_Screening_System_v3.0.exe" | Add-Content "release\便携版说明.txt" -Encoding UTF8
-        "3. 无需安装，无需管理员权限" | Add-Content "release\便携版说明.txt" -Encoding UTF8
-        "" | Add-Content "release\便携版说明.txt" -Encoding UTF8
-        "## 系统要求" | Add-Content "release\便携版说明.txt" -Encoding UTF8
-        "- Windows 7/8/10/11 (64位)" | Add-Content "release\便携版说明.txt" -Encoding UTF8
-        "- 4GB RAM (推荐8GB)" | Add-Content "release\便携版说明.txt" -Encoding UTF8
-        "- 500MB 可用磁盘空间" | Add-Content "release\便携版说明.txt" -Encoding UTF8
-        "" | Add-Content "release\便携版说明.txt" -Encoding UTF8
-        "## 注意事项" | Add-Content "release\便携版说明.txt" -Encoding UTF8
-        "- 便携版数据保存在程序目录下" | Add-Content "release\便携版说明.txt" -Encoding UTF8
-        "- 建议解压到非系统盘使用" | Add-Content "release\便携版说明.txt" -Encoding UTF8
-        "- 如需卸载，直接删除整个文件夹即可" | Add-Content "release\便携版说明.txt" -Encoding UTF8
-        "" | Add-Content "release\便携版说明.txt" -Encoding UTF8
-        "版本: v3.0" | Add-Content "release\便携版说明.txt" -Encoding UTF8
-        "构建时间: $(Get-Date)" | Add-Content "release\便携版说明.txt" -Encoding UTF8
-        
-        # 压缩便携版
-        powershell Compress-Archive -Path "release\*" -DestinationPath "DHI_Screening_System_v3.0_Portable.zip" -Force
-        
-        Write-Host "✅ 便携版创建完成"
-        
-    - name: Upload Enhanced Installer
-      uses: actions/upload-artifact@v4
-      with:
-        name: DHI_Enhanced_Installer
-        path: installer/
-        
-    - name: Upload Portable Version
-      uses: actions/upload-artifact@v4
-      with:
-        name: DHI_Portable_Version
-        path: DHI_Screening_System_v3.0_Portable.zip
-        
-    - name: Create comprehensive release info
-      run: |
-        $buildTime = Get-Date
-        
-        # 创建构建说明文档
-        "# DHI筛查分析系统 v3.0 - 增强兼容性构建" | Out-File -FilePath "构建说明.txt" -Encoding UTF8
-        "" | Add-Content "构建说明.txt" -Encoding UTF8
-        "## 🏢 开发单位" | Add-Content "构建说明.txt" -Encoding UTF8
-        "**伊利液奶奶科院**" | Add-Content "构建说明.txt" -Encoding UTF8
-        "" | Add-Content "构建说明.txt" -Encoding UTF8
-        "## 📦 构建产物" | Add-Content "构建说明.txt" -Encoding UTF8
-        "" | Add-Content "构建说明.txt" -Encoding UTF8
-        "### 1. 🎯 增强安装包（推荐）" | Add-Content "构建说明.txt" -Encoding UTF8
-        "**文件**: DHI_Screening_System_v3.0_Enhanced_Setup.exe" | Add-Content "构建说明.txt" -Encoding UTF8
-        "" | Add-Content "构建说明.txt" -Encoding UTF8
-        "**特性**:" | Add-Content "构建说明.txt" -Encoding UTF8
-        "- ✅ 智能版本检测和升级" | Add-Content "构建说明.txt" -Encoding UTF8
-        "- ✅ 自动卸载旧版本" | Add-Content "构建说明.txt" -Encoding UTF8
-        "- ✅ 完整的Windows集成" | Add-Content "构建说明.txt" -Encoding UTF8
-        "- ✅ 开始菜单程序组" | Add-Content "构建说明.txt" -Encoding UTF8
-        "- ✅ 桌面快捷方式（可选）" | Add-Content "构建说明.txt" -Encoding UTF8
-        "- ✅ 完整卸载功能" | Add-Content "构建说明.txt" -Encoding UTF8
-        "- ✅ 64位系统优化" | Add-Content "构建说明.txt" -Encoding UTF8
-        "" | Add-Content "构建说明.txt" -Encoding UTF8
-        "### 2. 💚 便携版本" | Add-Content "构建说明.txt" -Encoding UTF8
-        "**文件**: DHI_Screening_System_v3.0_Portable.zip" | Add-Content "构建说明.txt" -Encoding UTF8
-        "" | Add-Content "构建说明.txt" -Encoding UTF8
-        "**特性**:" | Add-Content "构建说明.txt" -Encoding UTF8
-        "- 💚 免安装绿色版本" | Add-Content "构建说明.txt" -Encoding UTF8
-        "- 📂 解压即用" | Add-Content "构建说明.txt" -Encoding UTF8
-        "- 🔓 无需管理员权限" | Add-Content "构建说明.txt" -Encoding UTF8
-        "- 📁 数据保存在程序目录" | Add-Content "构建说明.txt" -Encoding UTF8
-        "- 🗑️ 删除即卸载" | Add-Content "构建说明.txt" -Encoding UTF8
-        "" | Add-Content "构建说明.txt" -Encoding UTF8
-        "## 🖥️ 系统兼容性" | Add-Content "构建说明.txt" -Encoding UTF8
-        "" | Add-Content "构建说明.txt" -Encoding UTF8
-        "**支持的操作系统**:" | Add-Content "构建说明.txt" -Encoding UTF8
-        "- ✅ Windows 7 SP1 (64位)" | Add-Content "构建说明.txt" -Encoding UTF8
-        "- ✅ Windows 8/8.1 (64位)" | Add-Content "构建说明.txt" -Encoding UTF8
-        "- ✅ Windows 10 (64位)" | Add-Content "构建说明.txt" -Encoding UTF8
-        "- ✅ Windows 11 (64位)" | Add-Content "构建说明.txt" -Encoding UTF8
-        "" | Add-Content "构建说明.txt" -Encoding UTF8
-        "**硬件要求**:" | Add-Content "构建说明.txt" -Encoding UTF8
-        "- **处理器**: 64位处理器" | Add-Content "构建说明.txt" -Encoding UTF8
-        "- **内存**: 最低2GB，推荐4GB+" | Add-Content "构建说明.txt" -Encoding UTF8
-        "- **磁盘**: 500MB可用空间" | Add-Content "构建说明.txt" -Encoding UTF8
-        "- **显示器**: 1024x768分辨率" | Add-Content "构建说明.txt" -Encoding UTF8
-        "" | Add-Content "构建说明.txt" -Encoding UTF8
-        "**软件依赖**:" | Add-Content "构建说明.txt" -Encoding UTF8
-        "- 无需额外安装Python或其他运行时" | Add-Content "构建说明.txt" -Encoding UTF8
-        "- 内置所有必要组件" | Add-Content "构建说明.txt" -Encoding UTF8
-        "- 优化的启动性能（2-5秒）" | Add-Content "构建说明.txt" -Encoding UTF8
-        "" | Add-Content "构建说明.txt" -Encoding UTF8
-        "## 🚀 安装使用指南" | Add-Content "构建说明.txt" -Encoding UTF8
-        "" | Add-Content "构建说明.txt" -Encoding UTF8
-        "### 增强安装包安装步骤:" | Add-Content "构建说明.txt" -Encoding UTF8
-        "1. 下载 DHI_Screening_System_v3.0_Enhanced_Setup.exe" | Add-Content "构建说明.txt" -Encoding UTF8
-        "2. 右键选择'以管理员身份运行'" | Add-Content "构建说明.txt" -Encoding UTF8
-        "3. 如检测到旧版本，选择'是'自动卸载" | Add-Content "构建说明.txt" -Encoding UTF8
-        "4. 跟随安装向导完成安装" | Add-Content "构建说明.txt" -Encoding UTF8
-        "5. 从开始菜单启动程序" | Add-Content "构建说明.txt" -Encoding UTF8
-        "" | Add-Content "构建说明.txt" -Encoding UTF8
-        "### 便携版使用步骤:" | Add-Content "构建说明.txt" -Encoding UTF8
-        "1. 下载 DHI_Screening_System_v3.0_Portable.zip" | Add-Content "构建说明.txt" -Encoding UTF8
-        "2. 解压到任意目录（建议非系统盘）" | Add-Content "构建说明.txt" -Encoding UTF8
-        "3. 运行 DHI_Screening_System_v3.0.exe" | Add-Content "构建说明.txt" -Encoding UTF8
-        "4. 首次运行会自动初始化配置" | Add-Content "构建说明.txt" -Encoding UTF8
-        "" | Add-Content "构建说明.txt" -Encoding UTF8
-        "---" | Add-Content "构建说明.txt" -Encoding UTF8
-        "" | Add-Content "构建说明.txt" -Encoding UTF8
-        "**构建信息**:" | Add-Content "构建说明.txt" -Encoding UTF8
-        "- 🕒 构建时间: $buildTime" | Add-Content "构建说明.txt" -Encoding UTF8
-        "- 🏗️ 构建环境: GitHub Actions (Windows)" | Add-Content "构建说明.txt" -Encoding UTF8
-        "- 📦 打包工具: PyInstaller + Inno Setup" | Add-Content "构建说明.txt" -Encoding UTF8
-        "- 🔧 版本标识: v3.0-Enhanced" | Add-Content "构建说明.txt" -Encoding UTF8
-        "" | Add-Content "构建说明.txt" -Encoding UTF8
-        "**版权信息**:" | Add-Content "构建说明.txt" -Encoding UTF8
-        "Copyright (C) 2025 伊利液奶奶科院 版权所有" | Add-Content "构建说明.txt" -Encoding UTF8
-        
-        Write-Host "✅ 构建说明文档创建完成"
-        
-    - name: Upload Build Documentation
-      uses: actions/upload-artifact@v4
-      with:
-        name: Build_Documentation
-        path: 构建说明.txt 
+        Write-Host "🎉 构建完成摘要"
+        Write-Host "===================="
+        Write-Host "📦 版本: v3.3"
+        Write-Host "🔨 构建时间: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+        $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+        Write-Host "📂 OneDrive路径: DHI_Screening_System/releases/v3.3_$timestamp"
+        Write-Host "💾 备用下载: GitHub Actions Artifacts"
+        Write-Host "🖥️ 支持系统: Windows 7/8/10/11 (32位/64位)"
+        Write-Host "📋 使用说明: 参考upload_package中的version_info.txt"

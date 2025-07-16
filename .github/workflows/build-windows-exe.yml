@@ -1,4 +1,4 @@
-name: Build Windows EXE and Upload to OneDrive
+name: Build Windows EXE (OneDIR Mode)
 
 on:
   push:
@@ -28,134 +28,111 @@ jobs:
         pip install -r requirements.txt
         Write-Host "✅ 依赖安装成功"
     
-    - name: Build EXE with PyInstaller
+    - name: Build EXE with PyInstaller OneDIR Mode
       run: |
-        Write-Host "🔨 开始构建Windows可执行文件..."
+        Write-Host "�� 开始构建Windows可执行文件 (OneDIR模式)..."
+        Write-Host "📋 使用配置文件: DHI_Screening_System_v3.3.spec"
+        Write-Host "🚀 OneDIR模式优势: 启动速度快，文件结构清晰"
+        
         pyinstaller --clean --noconfirm "DHI_Screening_System_v3.3.spec"
         
-        $exePath = "dist\DHI_Screening_System_v3.3\DHI_Screening_System_v3.3.exe"
+        $distDir = "dist\DHI_Screening_System_v3.3"
+        $exePath = "$distDir\DHI_Screening_System_v3.3.exe"
+        
         if (Test-Path $exePath) {
           $fileSize = (Get-Item $exePath).Length / 1MB
           Write-Host "✅ EXE构建成功: $([math]::Round($fileSize, 2)) MB"
+          
+          Write-Host "📂 OneDIR构建结果:"
+          Get-ChildItem $distDir | Format-Table Name, Length, LastWriteTime
+          
+          $totalSize = (Get-ChildItem $distDir -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB
+          Write-Host "📊 完整应用大小: $([math]::Round($totalSize, 2)) MB"
+          
+          $fileCount = (Get-ChildItem $distDir -Recurse -File).Count
+          Write-Host "📄 文件总数: $fileCount"
+          
         } else {
           Write-Host "❌ EXE构建失败"
           exit 1
         }
     
-    - name: Prepare upload package
+    - name: Create distribution package
       run: |
-        Write-Host "📦 准备上传包..."
+        Write-Host "📦 创建分发包..."
         
-        $uploadDir = "upload_package"
-        if (Test-Path $uploadDir) {
-          Remove-Item -Recurse -Force $uploadDir
+        $packageDir = "DHI_Release_Package"
+        if (Test-Path $packageDir) {
+          Remove-Item -Recurse -Force $packageDir
         }
-        New-Item -ItemType Directory -Path $uploadDir
+        New-Item -ItemType Directory -Path $packageDir
         
-        $distDir = "dist\DHI_Screening_System_v3.3"
-        if (Test-Path $distDir) {
-          Copy-Item -Path "$distDir\*" -Destination $uploadDir -Recurse
-          Write-Host "✅ EXE文件已复制到上传目录"
-        }
+        $sourceDir = "dist\DHI_Screening_System_v3.3"
+        $targetDir = "$packageDir\DHI_Screening_System_v3.3"
+        
+        Copy-Item -Path $sourceDir -Destination $targetDir -Recurse
+        Write-Host "✅ OneDIR应用已复制到分发包"
         
         $docFiles = @("README.md", "LICENSE.txt", "CHANGELOG.md", "whg3r-qi1nv-001.ico")
         foreach ($file in $docFiles) {
           if (Test-Path $file) {
-            Copy-Item -Path $file -Destination $uploadDir
+            Copy-Item -Path $file -Destination $packageDir
             Write-Host "✅ 已复制: $file"
           }
         }
         
         $buildTime = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-        $versionContent = "DHI精准筛查助手 v3.3`n构建时间: $buildTime`n构建分支: $env:GITHUB_REF_NAME`n提交哈希: $env:GITHUB_SHA`n构建号: $env:GITHUB_RUN_NUMBER`n`n系统要求:`n- Windows 7/8/10/11 (32位或64位)`n- 内存: 4GB RAM 推荐`n- 硬盘: 100MB 可用空间`n`n使用说明:`n1. 直接运行 DHI_Screening_System_v3.3.exe`n2. 首次使用请参考 README.md`n3. 如有问题请查看 CHANGELOG.md`n`n技术支持: 伊利液奶奶科院"
+        $usageInfo = "DHI精准筛查助手 v3.3 - OneDIR版本`n`n=== 构建信息 ===`n构建时间: $buildTime`n构建方式: PyInstaller OneDIR Mode`n系统架构: Windows x64`nPython版本: 3.11`n`n=== 使用说明 ===`n1. 解压整个文件夹到目标位置`n2. 进入 DHI_Screening_System_v3.3 目录`n3. 双击运行 DHI_Screening_System_v3.3.exe`n`n=== OneDIR模式优势 ===`n✅ 启动速度快 (2-3秒)`n✅ 文件结构清晰`n✅ 依赖库独立存放`n✅ 便于调试和维护`n✅ 支持增量更新`n`n=== 系统要求 ===`n- Windows 7/8/10/11 (64位)`n- 内存: 4GB RAM 推荐`n- 硬盘: 200MB 可用空间`n`n技术支持: 伊利液奶奶科院"
         
-        $versionContent | Out-File -FilePath "$uploadDir\version_info.txt" -Encoding UTF8
+        $usageInfo | Out-File -FilePath "$packageDir\使用说明.txt" -Encoding UTF8
         
-        Write-Host "📋 上传包内容:"
-        Get-ChildItem $uploadDir | Format-Table Name, Length, LastWriteTime
+        $shortcutScript = '@echo off' + "`n" + 'echo 正在创建桌面快捷方式...' + "`n" + 'set "target=%~dp0DHI_Screening_System_v3.3\DHI_Screening_System_v3.3.exe"' + "`n" + 'set "shortcut=%USERPROFILE%\Desktop\DHI精准筛查助手.lnk"' + "`n" + 'powershell -Command "& {$WshShell = New-Object -comObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut(''%shortcut%''); $Shortcut.TargetPath = ''%target%''; $Shortcut.WorkingDirectory = ''%~dp0DHI_Screening_System_v3.3''; $Shortcut.IconLocation = ''%~dp0whg3r-qi1nv-001.ico''; $Shortcut.Save()}"' + "`n" + 'if exist "%shortcut%" (' + "`n" + '    echo ✅ 桌面快捷方式创建成功！' + "`n" + ') else (' + "`n" + '    echo ❌ 快捷方式创建失败' + "`n" + ')' + "`n" + 'pause'
         
-        $totalSize = (Get-ChildItem $uploadDir -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB
-        Write-Host "📊 上传包总大小: $([math]::Round($totalSize, 2)) MB"
+        $shortcutScript | Out-File -FilePath "$packageDir\创建桌面快捷方式.bat" -Encoding UTF8
+        
+        Write-Host "📋 分发包内容:"
+        Get-ChildItem $packageDir | Format-Table Name, Length, LastWriteTime
+        
+        $packageSize = (Get-ChildItem $packageDir -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB
+        Write-Host "📊 分发包总大小: $([math]::Round($packageSize, 2)) MB"
     
-    - name: Install rclone
+    - name: Create ZIP archive
       run: |
-        Write-Host "📥 安装rclone..."
-        $rcloneUrl = "https://downloads.rclone.org/rclone-current-windows-amd64.zip"
-        $rcloneZip = "rclone.zip"
+        Write-Host "🗜️ 创建ZIP压缩包..."
         
-        Invoke-WebRequest -Uri $rcloneUrl -OutFile $rcloneZip
-        Expand-Archive -Path $rcloneZip -DestinationPath "." -Force
+        $zipName = "DHI_Screening_System_v3.3_OneDIR_$(Get-Date -Format 'yyyyMMdd_HHmmss').zip"
         
-        $rcloneExe = Get-ChildItem -Path ".\rclone-*" -Name "rclone.exe" -Recurse | Select-Object -First 1
-        if ($rcloneExe) {
-          Copy-Item -Path $rcloneExe.FullName -Destination ".\rclone.exe"
-          Write-Host "✅ rclone安装成功"
+        Compress-Archive -Path "DHI_Release_Package\*" -DestinationPath $zipName -CompressionLevel Optimal
+        
+        if (Test-Path $zipName) {
+          $zipSize = (Get-Item $zipName).Length / 1MB
+          Write-Host "✅ ZIP压缩包创建成功: $([math]::Round($zipSize, 2)) MB"
+          Write-Host "📦 文件名: $zipName"
         } else {
-          Write-Host "❌ rclone安装失败"
-          exit 1
-        }
-    
-    - name: Configure OneDrive and Upload
-      env:
-        ONEDRIVE_TOKEN: ${{ secrets.ONEDRIVE_TOKEN }}
-      run: |
-        Write-Host "☁️ 配置OneDrive连接..."
-        
-        if (-not $env:ONEDRIVE_TOKEN) {
-          Write-Host "⚠️ 未配置OneDrive token，跳过上传"
-          Write-Host "📝 请在GitHub仓库设置中添加 ONEDRIVE_TOKEN secret"
-          exit 0
-        }
-        
-        $rcloneConfig = "[onedrive]`ntype = onedrive`ntoken = $env:ONEDRIVE_TOKEN`ndrive_id = `ndrive_type = personal"
-        
-        $configDir = "$env:APPDATA\rclone"
-        if (-not (Test-Path $configDir)) {
-          New-Item -ItemType Directory -Path $configDir -Force
-        }
-        
-        $rcloneConfig | Out-File -FilePath "$configDir\rclone.conf" -Encoding UTF8
-        
-        $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
-        $remotePath = "DHI_Screening_System/releases/v3.3_$timestamp"
-        
-        Write-Host "📤 开始上传到OneDrive: $remotePath"
-        
-        try {
-          .\rclone.exe copy "upload_package" "onedrive:$remotePath" --progress --verbose
-          
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host "✅ 上传成功!"
-            Write-Host "📂 OneDrive路径: $remotePath"
-            
-            Write-Host "📋 已上传的文件:"
-            .\rclone.exe ls "onedrive:$remotePath"
-          } else {
-            Write-Host "❌ 上传失败，错误代码: $LASTEXITCODE"
-            exit 1
-          }
-        } catch {
-          Write-Host "❌ 上传出错: $_"
+          Write-Host "❌ ZIP压缩包创建失败"
           exit 1
         }
     
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
-      if: always()
       with:
-        name: DHI-EXE-v3.3-${{ github.run_number }}
-        path: upload_package/
+        name: DHI-OneDIR-v3.3-${{ github.run_number }}
+        path: |
+          DHI_Screening_System_v3.3_OneDIR_*.zip
+          DHI_Release_Package/
         retention-days: 30
     
-    - name: Create release summary
-      if: success()
+    - name: Build summary
       run: |
-        Write-Host "🎉 构建完成摘要"
-        Write-Host "===================="
-        Write-Host "📦 版本: v3.3"
-        Write-Host "🔨 构建时间: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-        $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
-        Write-Host "📂 OneDrive路径: DHI_Screening_System/releases/v3.3_$timestamp"
-        Write-Host "💾 备用下载: GitHub Actions Artifacts"
-        Write-Host "🖥️ 支持系统: Windows 7/8/10/11 (32位/64位)"
-        Write-Host "📋 使用说明: 参考upload_package中的version_info.txt"
+        Write-Host "🎉 OneDIR构建完成摘要"
+        Write-Host "========================"
+        Write-Host "�� 版本: v3.3"
+        Write-Host "🔧 模式: PyInstaller OneDIR"
+        Write-Host "🚀 启动速度: 快速 (2-3秒)"
+        Write-Host "📂 输出: DHI_Screening_System_v3.3/ 目录"
+        Write-Host "💾 下载: GitHub Actions Artifacts"
+        Write-Host "📋 包含: 完整应用 + 使用说明 + 快捷方式脚本"
+        Write-Host "🖥️ 兼容: Windows 7/8/10/11 (64位)"
+        Write-Host ""
+        Write-Host "✅ 用户可以下载ZIP包，解压后直接使用"
+        Write-Host "✅ 支持用Inno Setup制作专业安装包"

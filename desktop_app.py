@@ -2377,44 +2377,45 @@ class MainWindow(QMainWindow):
         upload_layout.setContentsMargins(4, 4, 4, 4)  # 进一步压缩边距
         upload_layout.setSpacing(1)  # 进一步压缩间距
         
-        # 创建拖放上传区域 - 统一高度
+        # 创建拖放上传区域 - 大幅增大高度
         drop_area = QWidget()
-        drop_area.setFixedHeight(self.get_dpi_scaled_size(32))  # 统一高度为32px
+        drop_area.setFixedHeight(self.get_dpi_scaled_size(150))  # 增大高度为150px（约3倍），更易拖拽
         drop_area.setStyleSheet("""
             QWidget {
-                border: 1px dashed #007bff;
-                border-radius: 4px;
+                border: 2px dashed #007bff;
+                border-radius: 8px;
                 background-color: #f8f9fa;
-                margin: 1px;
+                margin: 2px;
             }
             QWidget:hover {
                 background-color: #e9f4ff;
                 border-color: #0056b3;
+                border-width: 3px;
             }
         """)
         
-        # 拖放区域布局 - 紧凑设计
+        # 拖放区域布局 - 优化设计
         drop_layout = QHBoxLayout(drop_area)  # 改为水平布局，节省垂直空间
-        drop_layout.setContentsMargins(8, 4, 8, 4)
-        drop_layout.setSpacing(8)
+        drop_layout.setContentsMargins(20, 15, 20, 15)  # 进一步增大内边距
+        drop_layout.setSpacing(15)  # 进一步增大间距
         
         # 上传图标
         upload_icon = QLabel("📤")
-        upload_icon.setStyleSheet("font-size: 18px; background: transparent; border: none;")
+        upload_icon.setStyleSheet("font-size: 32px; background: transparent; border: none;")
         drop_layout.addWidget(upload_icon)
         
         # 文字信息（垂直布局）
         text_widget = QWidget()
         text_layout = QVBoxLayout(text_widget)
         text_layout.setContentsMargins(0, 0, 0, 0)
-        text_layout.setSpacing(0)
+        text_layout.setSpacing(4)
         
         upload_text = QLabel("拖拽或点击选择DHI Excel文件")
-        upload_text.setStyleSheet("font-size: 11px; color: #6c757d; background: transparent; border: none;")
+        upload_text.setStyleSheet("font-size: 16px; color: #6c757d; background: transparent; border: none; font-weight: 500;")
         text_layout.addWidget(upload_text)
         
         format_hint = QLabel("支持 .xlsx, .xls 格式")
-        format_hint.setStyleSheet("font-size: 9px; color: #9ca3af; background: transparent; border: none;")
+        format_hint.setStyleSheet("font-size: 13px; color: #9ca3af; background: transparent; border: none;")
         text_layout.addWidget(format_hint)
         
         drop_layout.addWidget(text_widget)
@@ -2429,12 +2430,11 @@ class MainWindow(QMainWindow):
         # 移除最大高度限制，使用样式中的统一高度
         upload_layout.addWidget(self.upload_btn)
         
-        # 已选文件显示区域 - 优化高度（仅在有文件时显示）
+        # 已选文件显示区域 - 大幅增大高度（仅在有文件时显示）
         files_container = QWidget()
-        files_container.setMaximumHeight(self.get_dpi_scaled_size(30))  # 优化高度为30px
         self.files_layout = QVBoxLayout(files_container)
-        self.files_layout.setContentsMargins(1, 1, 1, 1)  # 进一步压缩到1px
-        self.files_layout.setSpacing(0)  # 进一步压缩到0px
+        self.files_layout.setContentsMargins(2, 2, 2, 2)  # 适当增加边距
+        self.files_layout.setSpacing(2)  # 适当增加间距
         
         # 文件列表容器（用于动态添加文件标签）
         self.file_list = QListWidget()  # 保持兼容性
@@ -2443,15 +2443,31 @@ class MainWindow(QMainWindow):
         # 文件标签容器
         self.file_tags_widget = QWidget()
         self.file_tags_layout = QVBoxLayout(self.file_tags_widget)
-        self.file_tags_layout.setContentsMargins(0, 0, 0, 0)
-        self.file_tags_layout.setSpacing(2)
+        self.file_tags_layout.setContentsMargins(4, 4, 4, 4)  # 进一步增加内边距
+        self.file_tags_layout.setSpacing(6)  # 进一步增加间距
         
         no_files_label = QLabel("尚未选择文件")
         no_files_label.setStyleSheet("color: #9ca3af; font-size: 11px; font-style: italic;")
         self.file_tags_layout.addWidget(no_files_label)
         self.file_tags_layout.addStretch()
         
-        self.files_layout.addWidget(self.file_tags_widget)
+        # 用QScrollArea包裹文件标签区域，固定为12条数据的高度
+        from PyQt6.QtWidgets import QScrollArea
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        
+        # 计算12条数据的高度：每条36px + 间距6px = 42px，12条 = 504px
+        single_file_height = self.get_dpi_scaled_size(36)  # 单个文件标签高度
+        spacing = self.get_dpi_scaled_size(6)  # 间距
+        total_height = (single_file_height + spacing) * 12  # 12条数据的总高度
+        scroll_area.setFixedHeight(total_height)  # 固定高度，超出时显示滚动条
+        
+        scroll_area.setWidget(self.file_tags_widget)
+        
+        self.files_layout.addWidget(scroll_area)
         upload_layout.addWidget(files_container)
         
         # 操作按钮区域 - 极度压缩
@@ -4173,28 +4189,31 @@ class MainWindow(QMainWindow):
     def create_file_tag(self, filename):
         """创建文件标签"""
         tag_widget = QWidget()
-        tag_widget.setMaximumHeight(self.get_dpi_scaled_size(24))  # 优化高度为24px
+        tag_widget.setMaximumHeight(self.get_dpi_scaled_size(36))  # 进一步增大高度为36px，更易阅读
         tag_widget.setStyleSheet("""
             QWidget {
                 background-color: #e9f4ff;
                 border: 1px solid #007bff;
-                border-radius: 10px;
-                margin: 1px;
+                border-radius: 12px;
+                margin: 2px;
             }
         """)
         
         tag_layout = QHBoxLayout(tag_widget)
-        tag_layout.setContentsMargins(8, 2, 8, 2)
-        tag_layout.setSpacing(4)
+        tag_layout.setContentsMargins(12, 6, 12, 6)  # 进一步增大内边距
+        tag_layout.setSpacing(8)  # 进一步增大间距
         
         # 文件图标
         file_icon = QLabel("📄")
-        file_icon.setStyleSheet("background: transparent; border: none; font-size: 10px;")
+        file_icon.setStyleSheet("background: transparent; border: none; font-size: 14px;")
         tag_layout.addWidget(file_icon)
         
-        # 文件名
+        # 文件名 - 支持文本换行和完整显示
         file_label = QLabel(filename)
-        file_label.setStyleSheet("background: transparent; border: none; font-size: 10px; color: #0056b3;")
+        file_label.setStyleSheet("background: transparent; border: none; font-size: 13px; color: #0056b3;")
+        file_label.setWordWrap(True)  # 允许文本换行
+        file_label.setMinimumWidth(self.get_dpi_scaled_size(200))  # 设置最小宽度确保文本有足够空间
+        file_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)  # 允许水平扩展
         tag_layout.addWidget(file_label)
         
         tag_layout.addStretch()
@@ -7144,6 +7163,8 @@ class MainWindow(QMainWindow):
         config_widget = QWidget()
         config_layout = QFormLayout(config_widget)
         config_layout.setContentsMargins(20, 10, 10, 10)
+        config_layout.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)  # 设置标签左对齐
+        config_layout.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)  # 设置表单左对齐
         
         # 根据处置办法类型创建对应的配置项
         if method_key == 'cull':  # 淘汰

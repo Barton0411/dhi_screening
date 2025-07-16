@@ -805,26 +805,23 @@ class FilterThread(QThread):
             # 添加启用的筛选项到display_fields
             # 定义所有支持的字段
             supported_fields = [
-                'protein_pct', 'somatic_cell_count', 'fat_pct', 'lactose_pct', 
-                'milk_yield', 'lactation_days', 'solids_pct', 'fat_protein_ratio',
-                'urea_nitrogen', 'total_fat_pct', 'total_protein_pct', 'mature_equivalent',
-                'somatic_cell_score', 'freezing_point', 'total_bacterial_count',
-                'dry_matter_intake', 'net_energy_lactation', 'metabolizable_protein',
-                'crude_protein', 'neutral_detergent_fiber', 'acid_detergent_fiber',
-                'starch', 'ether_extract', 'ash', 'calcium', 'phosphorus', 
-                'magnesium', 'sodium', 'potassium', 'sulfur'
+                'protein_pct', 'fat_pct', 'fat_protein_ratio', 'somatic_cell_count', 
+                'somatic_cell_score', 'urea_nitrogen', 'lactose_pct', 'milk_loss',
+                'milk_payment_diff', 'economic_loss', 'corrected_milk', 'persistency',
+                'whi', 'fore_milk_yield', 'fore_somatic_cell_count', 'fore_somatic_cell_score',
+                'fore_milk_loss', 'peak_milk_yield', 'peak_days', 'milk_305',
+                'total_milk_yield', 'total_fat_pct', 'total_protein_pct', 'mature_equivalent'
             ]
             
             for filter_name in enabled_filters:
                 if filter_name in supported_fields:
                     display_fields.append(filter_name)
             
-            # 确保包含必要的字段
+            # 确保包含必要的字段 - 任何性状筛选都需要泌乳天数和产奶量
             if 'lactation_days' not in display_fields:
                 display_fields.append('lactation_days')
             
-            # 如果启用了蛋白率筛选，确保包含产奶量用于加权平均计算
-            if 'protein_pct' in display_fields and 'milk_yield' not in display_fields:
+            if 'milk_yield' not in display_fields:
                 display_fields.append('milk_yield')
             
             self.log_updated.emit(f"📋 生成月度报告，包含字段: {display_fields}")
@@ -2524,33 +2521,28 @@ class MainWindow(QMainWindow):
         # 从配置文件加载可选筛选项
         available_filters = {
             'fat_pct': '乳脂率(%)',
-            'lactose_pct': '乳糖率(%)',
-            'milk_yield': '产奶量(Kg)',
-            'lactation_days': '泌乳天数(天)',
-            'solids_pct': '固形物(%)',
             'fat_protein_ratio': '脂蛋比',
+            'somatic_cell_count': '体细胞数(万/ml)',
+            'somatic_cell_score': '体细胞分',
             'urea_nitrogen': '尿素氮(mg/dl)',
+            'lactose_pct': '乳糖率',
+            'milk_loss': '奶损失(Kg)',
+            'milk_payment_diff': '奶款差',
+            'economic_loss': '经济损失',
+            'corrected_milk': '校正奶(Kg)',
+            'persistency': '持续力',
+            'whi': 'WHI',
+            'fore_milk_yield': '前奶量(Kg)',
+            'fore_somatic_cell_count': '前体细胞(万/ml)',
+            'fore_somatic_cell_score': '前体细胞分',
+            'fore_milk_loss': '前奶损失(Kg)',
+            'peak_milk_yield': '高峰奶(Kg)',
+            'peak_days': '高峰日(天)',
+            'milk_305': '305奶量(Kg)',
+            'total_milk_yield': '总奶量(Kg)',
             'total_fat_pct': '总乳脂(%)',
             'total_protein_pct': '总蛋白(%)',
-            'mature_equivalent': '成年当量(Kg)',
-            'somatic_cell_score': '体细胞分',
-            'freezing_point': '冰点',
-            'total_bacterial_count': '细菌总数',
-            'dry_matter_intake': '干物质采食量',
-            'net_energy_lactation': '泌乳净能',
-            'metabolizable_protein': '可代谢蛋白',
-            'crude_protein': '粗蛋白',
-            'neutral_detergent_fiber': '中性洗涤纤维',
-            'acid_detergent_fiber': '酸性洗涤纤维',
-            'starch': '淀粉',
-            'ether_extract': '醚提取物',
-            'ash': '灰分',
-            'calcium': '钙',
-            'phosphorus': '磷',
-            'magnesium': '镁',
-            'sodium': '钠',
-            'potassium': '钾',
-            'sulfur': '硫'
+            'mature_equivalent': '成年当量(Kg)'
         }
         
         row = 0

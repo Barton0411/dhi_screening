@@ -1538,6 +1538,8 @@ class DataProcessor:
         
         result_rows = []
         all_protein_milk_pairs = []  # 收集所有(蛋白率, 产奶量)对用于计算加权总平均值
+        all_fat_milk_pairs = []  # 收集所有(乳脂率, 产奶量)对用于计算加权总平均值  
+        all_lactose_milk_pairs = []  # 收集所有(乳糖率, 产奶量)对用于计算加权总平均值
         all_total_milk = 0  # 总产奶量
         
         # 收集所有月份信息
@@ -1587,8 +1589,10 @@ class DataProcessor:
                         'date': sample_date
                     }
             
-            # 计算这头牛的蛋白率平均值 - 改为加权平均（仅当蛋白率在display_fields中时）
+            # 计算这头牛的加权平均值（蛋白率、乳脂率、乳糖率）
             cow_protein_values = []  # 存储(蛋白率, 产奶量)对
+            cow_fat_values = []  # 存储(乳脂率, 产奶量)对
+            cow_lactose_values = []  # 存储(乳糖率, 产奶量)对
             cow_total_milk = 0  # 总产奶量
             last_lactation_days = None
             
@@ -1603,17 +1607,31 @@ class DataProcessor:
             # 定义字段的中文名称映射
             field_chinese_map = {
                 'protein_pct': '蛋白率(%)',
-                'somatic_cell_count': '体细胞数(万/ml)',
                 'fat_pct': '乳脂率(%)',
-                'lactose_pct': '乳糖率(%)',
-                'milk_yield': '产奶量(Kg)',
-                'lactation_days': '泌乳天数(天)',
-                'solids_pct': '固形物(%)',
                 'fat_protein_ratio': '脂蛋比',
+                'somatic_cell_count': '体细胞数(万/ml)',
+                'somatic_cell_score': '体细胞分',
                 'urea_nitrogen': '尿素氮(mg/dl)',
+                'lactose_pct': '乳糖率',
+                'milk_loss': '奶损失(Kg)',
+                'milk_payment_diff': '奶款差',
+                'economic_loss': '经济损失',
+                'corrected_milk': '校正奶(Kg)',
+                'persistency': '持续力',
+                'whi': 'WHI',
+                'fore_milk_yield': '前奶量(Kg)',
+                'fore_somatic_cell_count': '前体细胞(万/ml)',
+                'fore_somatic_cell_score': '前体细胞分',
+                'fore_milk_loss': '前奶损失(Kg)',
+                'peak_milk_yield': '高峰奶(Kg)',
+                'peak_days': '高峰日(天)',
+                'milk_305': '305奶量(Kg)',
+                'total_milk_yield': '总奶量(Kg)',
                 'total_fat_pct': '总乳脂(%)',
                 'total_protein_pct': '总蛋白(%)',
-                'mature_equivalent': '成年当量(Kg)'
+                'mature_equivalent': '成年当量(Kg)',
+                'milk_yield': '产奶量(Kg)',
+                'lactation_days': '泌乳天数(天)'
             }
             
             for year_month in sorted_month_names:
@@ -1647,18 +1665,26 @@ class DataProcessor:
                             else:
                                 row_data[column_name] = None
                             
-                            # 收集蛋白率和产奶量用于加权平均计算
-                            if field == 'protein_pct' and field_value is not None:
+                            # 收集蛋白率、乳脂率、乳糖率和产奶量用于加权平均计算
+                            if field in ['protein_pct', 'fat_pct', 'lactose_pct'] and field_value is not None:
                                 # 需要对应的产奶量
                                 milk_value = None
                                 if 'milk_yield' in record and pd.notna(record['milk_yield']):
                                     milk_value = record['milk_yield']
                                     
                                 if milk_value is not None:
-                                    cow_protein_values.append((float(field_value), float(milk_value)))
+                                    # 收集各个指标的加权平均数据
+                                    if field == 'protein_pct':
+                                        cow_protein_values.append((float(field_value), float(milk_value)))
+                                        all_protein_milk_pairs.append((float(field_value), float(milk_value)))
+                                    elif field == 'fat_pct':
+                                        cow_fat_values.append((float(field_value), float(milk_value)))
+                                        all_fat_milk_pairs.append((float(field_value), float(milk_value)))
+                                    elif field == 'lactose_pct':
+                                        cow_lactose_values.append((float(field_value), float(milk_value)))
+                                        all_lactose_milk_pairs.append((float(field_value), float(milk_value)))
+                                    
                                     cow_total_milk += float(milk_value)
-                                    # 同时收集用于总平均值计算的数据
-                                    all_protein_milk_pairs.append((float(field_value), float(milk_value)))
                                     all_total_milk += float(milk_value)
                 else:
                     # 该月份没有数据，为所有启用的字段添加空值
@@ -1671,7 +1697,8 @@ class DataProcessor:
                             column_name = f"{year_month}{chinese_name}"
                             row_data[column_name] = None
             
-            # 3. 添加加权平均蛋白率（仅当display_fields中包含蛋白率时）
+            # 3. 添加加权平均值（蛋白率、乳脂率、乳糖率）
+            # 加权平均蛋白率
             if 'protein_pct' in display_fields:
                 if cow_protein_values and cow_total_milk > 0:
                     weighted_protein_sum = sum(protein * milk for protein, milk in cow_protein_values)
@@ -1679,6 +1706,24 @@ class DataProcessor:
                     row_data['平均蛋白率(%)'] = round(cow_avg, 2)
                 else:
                     row_data['平均蛋白率(%)'] = None
+            
+            # 加权平均乳脂率
+            if 'fat_pct' in display_fields:
+                if cow_fat_values and cow_total_milk > 0:
+                    weighted_fat_sum = sum(fat * milk for fat, milk in cow_fat_values)
+                    cow_avg = weighted_fat_sum / cow_total_milk
+                    row_data['平均乳脂率(%)'] = round(cow_avg, 2)
+                else:
+                    row_data['平均乳脂率(%)'] = None
+            
+            # 加权平均乳糖率
+            if 'lactose_pct' in display_fields:
+                if cow_lactose_values and cow_total_milk > 0:
+                    weighted_lactose_sum = sum(lactose * milk for lactose, milk in cow_lactose_values)
+                    cow_avg = weighted_lactose_sum / cow_total_milk
+                    row_data['平均乳糖率(%)'] = round(cow_avg, 2)
+                else:
+                    row_data['平均乳糖率(%)'] = None
             
             # 4. 添加最后一个月的泌乳天数
             if last_lactation_days is not None:
@@ -1733,17 +1778,31 @@ class DataProcessor:
             # 定义字段的中文名称映射（与上面保持一致）
             field_chinese_map = {
                 'protein_pct': '蛋白率(%)',
-                'somatic_cell_count': '体细胞数(万/ml)',
                 'fat_pct': '乳脂率(%)',
-                'lactose_pct': '乳糖率(%)',
-                'milk_yield': '产奶量(Kg)',
-                'lactation_days': '泌乳天数(天)',
-                'solids_pct': '固形物(%)',
                 'fat_protein_ratio': '脂蛋比',
+                'somatic_cell_count': '体细胞数(万/ml)',
+                'somatic_cell_score': '体细胞分',
                 'urea_nitrogen': '尿素氮(mg/dl)',
+                'lactose_pct': '乳糖率',
+                'milk_loss': '奶损失(Kg)',
+                'milk_payment_diff': '奶款差',
+                'economic_loss': '经济损失',
+                'corrected_milk': '校正奶(Kg)',
+                'persistency': '持续力',
+                'whi': 'WHI',
+                'fore_milk_yield': '前奶量(Kg)',
+                'fore_somatic_cell_count': '前体细胞(万/ml)',
+                'fore_somatic_cell_score': '前体细胞分',
+                'fore_milk_loss': '前奶损失(Kg)',
+                'peak_milk_yield': '高峰奶(Kg)',
+                'peak_days': '高峰日(天)',
+                'milk_305': '305奶量(Kg)',
+                'total_milk_yield': '总奶量(Kg)',
                 'total_fat_pct': '总乳脂(%)',
                 'total_protein_pct': '总蛋白(%)',
-                'mature_equivalent': '成年当量(Kg)'
+                'mature_equivalent': '成年当量(Kg)',
+                'milk_yield': '产奶量(Kg)',
+                'lactation_days': '泌乳天数(天)'
             }
             
             # 添加月度列（按时间顺序，按display_fields中的字段顺序）
@@ -1761,6 +1820,10 @@ class DataProcessor:
             summary_columns = []
             if 'protein_pct' in display_fields:
                 summary_columns.append('平均蛋白率(%)')
+            if 'fat_pct' in display_fields:
+                summary_columns.append('平均乳脂率(%)')
+            if 'lactose_pct' in display_fields:
+                summary_columns.append('平均乳糖率(%)')
             if 'lactation_days' in display_fields:
                 summary_columns.append('最后一个月泌乳天数(天)')
             summary_columns.append('最后一次采样日')
@@ -1775,13 +1838,30 @@ class DataProcessor:
             available_columns = [col for col in ordered_columns if col in result_df.columns]
             result_df = result_df[available_columns]
         
-        # 计算所有月份蛋白率的加权总平均值和各月平均值，存储为DataFrame属性
+        # 计算所有月份的加权总平均值，存储为DataFrame属性
+        # 蛋白率总平均值
         if all_protein_milk_pairs and all_total_milk > 0:
             weighted_overall_sum = sum(protein * milk for protein, milk in all_protein_milk_pairs)
             overall_avg = weighted_overall_sum / all_total_milk
             result_df.attrs['overall_protein_avg'] = round(overall_avg, 2)
         else:
             result_df.attrs['overall_protein_avg'] = None
+        
+        # 乳脂率总平均值
+        if all_fat_milk_pairs and all_total_milk > 0:
+            weighted_overall_sum = sum(fat * milk for fat, milk in all_fat_milk_pairs)
+            overall_avg = weighted_overall_sum / all_total_milk
+            result_df.attrs['overall_fat_avg'] = round(overall_avg, 2)
+        else:
+            result_df.attrs['overall_fat_avg'] = None
+        
+        # 乳糖率总平均值
+        if all_lactose_milk_pairs and all_total_milk > 0:
+            weighted_overall_sum = sum(lactose * milk for lactose, milk in all_lactose_milk_pairs)
+            overall_avg = weighted_overall_sum / all_total_milk
+            result_df.attrs['overall_lactose_avg'] = round(overall_avg, 2)
+        else:
+            result_df.attrs['overall_lactose_avg'] = None
         
         # 计算胎次平均值
         if not result_df.empty and 'parity' in result_df.columns:

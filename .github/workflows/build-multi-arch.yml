@@ -20,11 +20,15 @@ jobs:
             arch-display: '64位'
             inno-arch: 'x64'
             min-version: '6.1'
+            arch-allowed: 'x64'
+            arch-install-mode: 'x64'
           - architecture: 'x86'
             python-architecture: 'x86'
             arch-display: '32位'
             inno-arch: 'x86'
             min-version: '6.1'
+            arch-allowed: 'x86 x64'
+            arch-install-mode: ''
     
     steps:
     - name: Checkout code
@@ -38,7 +42,7 @@ jobs:
     
     - name: Install dependencies
       run: |
-        Write-Host "�� 安装Python依赖 (${{ matrix.arch-display }})..."
+        Write-Host "🔧 安装Python依赖 (${{ matrix.arch-display }})..."
         python -m pip install --upgrade pip setuptools wheel
         pip install pyinstaller
         pip install -r requirements.txt
@@ -48,7 +52,7 @@ jobs:
     - name: Create PyInstaller spec
       run: |
         Write-Host "📝 创建PyInstaller配置 (${{ matrix.arch-display }})..."
-        $specContent = @"
+        $specContent = @'
 # -*- mode: python ; coding: utf-8 -*-
 block_cipher = None
 
@@ -91,7 +95,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='DHI_Screening_System_v3.1_${{ matrix.architecture }}',
+    name='DHI_Screening_System_v3.2_${{ matrix.architecture }}',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -113,10 +117,12 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='DHI_Screening_System_v3.1_${{ matrix.architecture }}'
+    name='DHI_Screening_System_v3.2_${{ matrix.architecture }}'
 )
-"@
-        $specContent | Out-File "DHI_v3.1_${{ matrix.architecture }}.spec" -Encoding UTF8
+'@
+        $specContent = $specContent -replace '\$\{\{ matrix\.architecture \}\}', '${{ matrix.architecture }}'
+        $specContent = $specContent -replace '\$\{\{ matrix\.inno-arch \}\}', '${{ matrix.inno-arch }}'
+        $specContent | Out-File "DHI_v3.2_${{ matrix.architecture }}.spec" -Encoding UTF8
         Write-Host "✅ Spec文件创建完成"
     
     - name: Build EXE
@@ -125,14 +131,15 @@ coll = COLLECT(
         if (Test-Path "build") { Remove-Item -Recurse -Force "build" }
         if (Test-Path "dist") { Remove-Item -Recurse -Force "dist" }
         
-        pyinstaller --clean --noconfirm "DHI_v3.1_${{ matrix.architecture }}.spec"
+        pyinstaller --clean --noconfirm "DHI_v3.2_${{ matrix.architecture }}.spec"
         
-        $exePath = "dist\DHI_Screening_System_v3.1_${{ matrix.architecture }}\DHI_Screening_System_v3.1_${{ matrix.architecture }}.exe"
+        $exePath = "dist\DHI_Screening_System_v3.2_${{ matrix.architecture }}\DHI_Screening_System_v3.2_${{ matrix.architecture }}.exe"
         if (Test-Path $exePath) {
           $fileSize = (Get-Item $exePath).Length / 1MB
           Write-Host "✅ ${{ matrix.arch-display }}EXE构建成功: $([math]::Round($fileSize, 2)) MB"
         } else {
           Write-Host "❌ ${{ matrix.arch-display }}EXE构建失败"
+          Get-ChildItem dist -Recurse
           exit 1
         }
     
@@ -150,37 +157,32 @@ coll = COLLECT(
     - name: Create Installer Script
       run: |
         Write-Host "📝 创建${{ matrix.arch-display }}安装脚本..."
-        $archSettings = if ("${{ matrix.architecture }}" -eq "x64") {
-          @"
-ArchitecturesAllowed=x64
-ArchitecturesInstallIn64BitMode=x64
-"@
-        } else {
-          "ArchitecturesAllowed=x86 x64"
-        }
         
-        $issContent = @"
+        $issContent = @'
 #define MyAppName "DHI精准筛查助手"
-#define MyAppVersion "3.1"
+#define MyAppVersion "3.2"
 #define MyAppPublisher "伊利液奶奶科院"
-#define MyAppExeName "DHI_Screening_System_v3.1_${{ matrix.architecture }}.exe"
+#define MyAppExeName "DHI_Screening_System_v3.2_ARCH.exe"
+#define MyAppArch "ARCH"
+#define MyAppArchDisplay "ARCH_DISPLAY"
 
 [Setup]
-AppId={{B6F5E7D4-8A2C-4F1B-9E3D-7A6C8B9D0E1${{ matrix.architecture == 'x64' && 'F' || 'E' }}}}
+AppId={{B6F5E7D4-8A2C-4F1B-9E3D-7A6C8B9D0E1ARCH_ID}}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
-AppVerName={#MyAppName} v{#MyAppVersion} (${{ matrix.arch-display }})
+AppVerName={#MyAppName} v{#MyAppVersion} ({#MyAppArchDisplay})
 AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 OutputDir=installer
-OutputBaseFilename=DHI_Screening_System_v{#MyAppVersion}_${{ matrix.architecture }}_Setup
+OutputBaseFilename=DHI_Screening_System_v{#MyAppVersion}_{#MyAppArch}_Setup
 SetupIconFile=whg3r-qi1nv-001.ico
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-MinVersion=${{ matrix.min-version }}
-$archSettings
+MinVersion=MIN_VERSION
+ArchitecturesAllowed=ARCH_ALLOWED
+ARCH_INSTALL_MODE_LINE
 PrivilegesRequired=admin
 
 [Languages]
@@ -190,7 +192,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "dist\DHI_Screening_System_v3.1_${{ matrix.architecture }}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "dist\DHI_Screening_System_v3.2_ARCH\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "CHANGELOG.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
@@ -205,7 +207,28 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilen
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
-"@
+'@
+        
+        # 替换架构相关的占位符
+        $issContent = $issContent -replace 'ARCH', '${{ matrix.architecture }}'
+        $issContent = $issContent -replace 'ARCH_DISPLAY', '${{ matrix.arch-display }}'
+        $issContent = $issContent -replace 'MIN_VERSION', '${{ matrix.min-version }}'
+        $issContent = $issContent -replace 'ARCH_ALLOWED', '${{ matrix.arch-allowed }}'
+        
+        # 处理架构安装模式
+        if ('${{ matrix.arch-install-mode }}' -ne '') {
+          $issContent = $issContent -replace 'ARCH_INSTALL_MODE_LINE', 'ArchitecturesInstallIn64BitMode=${{ matrix.arch-install-mode }}'
+        } else {
+          $issContent = $issContent -replace 'ARCH_INSTALL_MODE_LINE', '; 32位兼容模式'
+        }
+        
+        # 处理架构ID
+        if ('${{ matrix.architecture }}' -eq 'x64') {
+          $issContent = $issContent -replace 'ARCH_ID', 'F'
+        } else {
+          $issContent = $issContent -replace 'ARCH_ID', 'E'
+        }
+        
         $issContent | Out-File "DHI_Setup_${{ matrix.architecture }}.iss" -Encoding UTF8
         Write-Host "✅ 安装脚本创建完成"
     
@@ -216,12 +239,13 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
         
         & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "DHI_Setup_${{ matrix.architecture }}.iss"
         
-        $installerPath = "installer\DHI_Screening_System_v3.1_${{ matrix.architecture }}_Setup.exe"
+        $installerPath = "installer\DHI_Screening_System_v3.2_${{ matrix.architecture }}_Setup.exe"
         if (Test-Path $installerPath) {
           $installerSize = (Get-Item $installerPath).Length / 1MB
           Write-Host "✅ ${{ matrix.arch-display }}安装包构建成功: $([math]::Round($installerSize, 2)) MB"
         } else {
           Write-Host "❌ 安装包构建失败"
+          Get-ChildItem installer -ErrorAction SilentlyContinue
           exit 1
         }
     
@@ -229,7 +253,7 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
       uses: actions/upload-artifact@v4
       with:
         name: DHI-Installer-${{ matrix.architecture }}
-        path: installer/DHI_Screening_System_v3.1_${{ matrix.architecture }}_Setup.exe
+        path: installer/DHI_Screening_System_v3.2_${{ matrix.architecture }}_Setup.exe
         retention-days: 30
 
   create-release:
@@ -257,8 +281,9 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
           ## 🎉 DHI精准筛查助手新版本发布
           
           ### 📦 下载说明
-          - **64位系统**：下载 `DHI_Screening_System_v3.1_x64_Setup.exe`
-          - **32位系统**：下载 `DHI_Screening_System_v3.1_x86_Setup.exe`
+          - **64位系统**：下载 `DHI_Screening_System_v3.2_x64_Setup.exe`
+          - **32位系统**：下载 `DHI_Screening_System_v3.2_x86_Setup.exe`
+          - **32位系统兼容性**：x86版本可以在32位和64位系统上安装
           
           ### ✨ 主要功能
           - 🔍 DHI数据智能筛选
@@ -269,6 +294,11 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
           ### 💻 系统要求
           - Windows 7/8/10/11
           - 64位或32位系统均可
+          
+          ### 🔧 架构选择指南
+          - **确定您的系统架构**：控制面板 → 系统 → 查看"系统类型"
+          - **64位操作系统**：可选择任一版本，推荐x64版本
+          - **32位操作系统**：必须选择x86版本
           
           详细更新说明请查看 CHANGELOG.md
         draft: false
@@ -281,8 +311,8 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: artifacts/DHI-Installer-x64/DHI_Screening_System_v3.1_x64_Setup.exe
-        asset_name: DHI_Screening_System_v3.1_x64_Setup.exe
+        asset_path: artifacts/DHI-Installer-x64/DHI_Screening_System_v3.2_x64_Setup.exe
+        asset_name: DHI_Screening_System_v3.2_x64_Setup.exe
         asset_content_type: application/octet-stream
     
     - name: Upload x86 Installer
@@ -291,6 +321,6 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: artifacts/DHI-Installer-x86/DHI_Screening_System_v3.1_x86_Setup.exe
-        asset_name: DHI_Screening_System_v3.1_x86_Setup.exe
+        asset_path: artifacts/DHI-Installer-x86/DHI_Screening_System_v3.2_x86_Setup.exe
+        asset_name: DHI_Screening_System_v3.2_x86_Setup.exe
         asset_content_type: application/octet-stream

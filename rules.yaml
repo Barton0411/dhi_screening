@@ -472,3 +472,65 @@ treatment_methods:
     
   # 默认处理
   default_treatment: true  # 如果没有符合其他条件，默认为治疗 
+
+# 构建和打包规则
+build_packaging:
+  # 架构兼容性问题和解决方案
+  architecture_compatibility:
+    problem_description: |
+      Windows安装包可能出现"This program can only be installed on versions of Windows 
+      designed for the following processor architectures: x64"错误，导致32位系统无法安装。
+    
+    root_cause: |
+      Inno Setup安装脚本中的ArchitecturesAllowed和ArchitecturesInstallIn64BitMode配置不当，
+      导致x86版本安装包被错误地限制为只能在64位系统上安装。
+    
+    solution:
+      x64_version:
+        description: "64位版本：只能在64位系统上安装"
+        inno_setup_config: |
+          ArchitecturesAllowed=x64
+          ArchitecturesInstallIn64BitMode=x64
+      
+      x86_version:
+        description: "32位版本：可以在32位和64位系统上安装"
+        inno_setup_config: |
+          ArchitecturesAllowed=x86 x64
+          ; 不设置ArchitecturesInstallIn64BitMode，使用32位兼容模式
+    
+    verification_steps:
+      - "在64位Windows系统上测试x64和x86两个版本都能正常安装"
+      - "在32位Windows系统上测试x86版本能正常安装"
+      - "确认x64版本在32位系统上显示正确的错误提示"
+      - "验证安装包的架构检测逻辑正确工作"
+    
+    prevention_checklist:
+      - "检查PyInstaller的target_arch设置是否正确"
+      - "验证Inno Setup的架构配置是否符合目标平台"
+      - "确保版本标识和文件名包含架构信息"
+      - "在多种Windows架构上进行测试"
+  
+  # GitHub Actions构建规则
+  github_actions:
+    matrix_strategy:
+      architectures: ["x64", "x86"]
+      python_versions: ["3.11"]
+      
+    build_steps:
+      - "设置正确的Python架构"
+      - "创建架构特定的PyInstaller spec文件"
+      - "构建对应架构的EXE文件"
+      - "生成架构特定的Inno Setup脚本"
+      - "构建最终安装包"
+      - "验证构建结果和文件大小"
+    
+    naming_convention:
+      exe_file: "DHI_Screening_System_v{version}_{arch}.exe"
+      installer_file: "DHI_Screening_System_v{version}_{arch}_Setup.exe"
+      spec_file: "DHI_v{version}_{arch}.spec"
+    
+    quality_assurance:
+      - "每个架构独立测试"
+      - "验证安装包大小合理"
+      - "检查依赖项完整性"
+      - "确认图标和元数据正确"

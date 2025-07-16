@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-隐形乳房炎月度监测模块
+隐性乳房炎月度监测模块
 功能：计算月度流行率、新发感染率、慢性感染率等6个关键指标
 """
 
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class MastitisMonitoringCalculator:
-    """隐形乳房炎月度监测计算器"""
+    """隐性乳房炎月度监测计算器"""
     
     def __init__(self, scc_threshold: float = 20.0):
         """
@@ -238,7 +238,7 @@ class MastitisMonitoringCalculator:
             months = sorted(self.monthly_data.keys())
             month_count = len(months)
             
-            logger.info(f"开始计算隐形乳房炎月度监测指标，共{month_count}个月: {months}")
+            logger.info(f"开始计算隐性乳房炎月度监测指标，共{month_count}个月: {months}")
             
             # 检查月份连续性
             continuity_check = self._check_month_continuity(months)

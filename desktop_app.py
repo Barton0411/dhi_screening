@@ -2280,7 +2280,7 @@ class MainWindow(QMainWindow):
         self.create_dhi_filter_tab()
         self.create_mastitis_screening_tab()
         
-        # 隐形乳房炎月度监测标签页
+        # 隐性乳房炎月度监测标签页
         self.create_mastitis_monitoring_tab()
         
         layout.addWidget(self.function_tabs)
@@ -2312,7 +2312,7 @@ class MainWindow(QMainWindow):
         
         # 文件列表
         self.file_list = QListWidget()
-        list_height = self.get_dpi_scaled_size(100)
+        list_height = self.get_dpi_scaled_size(35)  # 调整为一行高度
         self.file_list.setMaximumHeight(list_height)
         
         list_border_radius = self.get_dpi_scaled_size(4)
@@ -2585,20 +2585,14 @@ class MainWindow(QMainWindow):
         added_label.setStyleSheet("color: #495057; font-weight: bold; font-size: 13px; margin-top: 10px;")
         other_filters_layout.addWidget(added_label)
         
-        # 滚动区域用于显示已添加的筛选项
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setMaximumHeight(200)
-        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        
-        scroll_widget = QWidget()
-        self.other_filters_layout = QVBoxLayout(scroll_widget)
+        # 动态调整的筛选项容器（无滚动条）
+        self.filters_container = QWidget()
+        self.other_filters_layout = QVBoxLayout(self.filters_container)
         self.other_filters_layout.setContentsMargins(5, 5, 5, 5)
         self.other_filters_layout.addStretch()
         
-        scroll_area.setWidget(scroll_widget)
-        other_filters_layout.addWidget(scroll_area)
+        # 直接添加容器，不使用滚动区域
+        other_filters_layout.addWidget(self.filters_container)
         
         tab_layout.addWidget(other_filters_group)
         
@@ -3022,7 +3016,7 @@ class MainWindow(QMainWindow):
         self.function_tabs.addTab(tab_widget, "🏥 慢性乳房炎筛查")
 
     def create_mastitis_monitoring_tab(self):
-        """创建隐形乳房炎月度监测标签页"""
+        """创建隐性乳房炎月度监测标签页"""
         try:
             import pyqtgraph as pg
         except ImportError:
@@ -3034,7 +3028,7 @@ class MainWindow(QMainWindow):
             error_label.setStyleSheet("color: #dc3545; padding: 20px;")
             tab_layout.addWidget(error_label)
             tab_layout.addStretch()
-            self.function_tabs.addTab(tab_widget, "👁️ 隐形乳房炎监测")
+            self.function_tabs.addTab(tab_widget, "👁️ 隐性乳房炎监测")
             return
 
         tab_widget = QWidget()
@@ -3043,7 +3037,7 @@ class MainWindow(QMainWindow):
         tab_layout.setContentsMargins(15, 15, 15, 15)
         
         # 创建标题
-        title_label = QLabel("隐形乳房炎月度监测")
+        title_label = QLabel("隐性乳房炎月度监测")
         title_label.setStyleSheet("""
             QLabel {
                 font-size: 18px;
@@ -3115,24 +3109,7 @@ class MainWindow(QMainWindow):
             }
         """)
         
-        # DHI数据上传
-        dhi_data_btn = QPushButton("📊 上传DHI数据")
-        dhi_data_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #28a745;
-                color: white;
-                border: none;
-                padding: 6px 12px;
-                border-radius: 4px;
-                font-weight: bold;
-                font-size: 11px;
-            }
-            QPushButton:hover {
-                background-color: #218838;
-            }
-        """)
-        dhi_data_btn.clicked.connect(self.upload_dhi_for_monitoring)
-        dhi_data_btn.setMaximumWidth(120)
+
         
         # 数据状态显示
         self.monitoring_data_status = QLabel()
@@ -3152,7 +3129,6 @@ class MainWindow(QMainWindow):
         # 添加到配置布局
         config_layout.addWidget(threshold_label)
         config_layout.addWidget(self.monitoring_scc_threshold)
-        config_layout.addWidget(dhi_data_btn)
         config_layout.addWidget(self.start_monitoring_btn)
         config_layout.addWidget(self.export_monitoring_btn)
         config_layout.addStretch()
@@ -3169,10 +3145,10 @@ class MainWindow(QMainWindow):
         self.mastitis_monitoring_calculator = None
         self.mastitis_monitoring_results = None
         
-        self.function_tabs.addTab(tab_widget, "👁️ 隐形乳房炎监测")
+        self.function_tabs.addTab(tab_widget, "👁️ 隐性乳房炎监测")
     
     def update_monitoring_data_status(self):
-        """更新隐形乳房炎监测的数据状态显示"""
+        """更新隐性乳房炎监测的数据状态显示"""
         status_lines = []
         
         # 检查牛群基础信息
@@ -3183,23 +3159,24 @@ class MainWindow(QMainWindow):
         else:
             status_lines.append("❌ 牛群基础信息: 未上传 (请先到'慢性乳房炎筛查'中上传)")
         
-        # 检查DHI数据
-        if hasattr(self, 'mastitis_monitoring_calculator') and self.mastitis_monitoring_calculator:
-            if hasattr(self.mastitis_monitoring_calculator, 'monthly_data') and self.mastitis_monitoring_calculator.monthly_data:
-                month_count = len(self.mastitis_monitoring_calculator.monthly_data)
-                status_lines.append(f"✅ DHI数据: {month_count}个月份")
+        # 检查DHI数据（基于基础数据标签页的上传状态）
+        if hasattr(self, 'data_list') and self.data_list:
+            # 计算有效的数据文件数量
+            valid_files = [item for item in self.data_list if item.get('data') is not None and not item['data'].empty]
+            if valid_files:
+                status_lines.append(f"✅ DHI数据: 已上传{len(valid_files)}个文件 (来自基础数据)")
             else:
-                status_lines.append("❌ DHI数据: 未上传")
+                status_lines.append("❌ DHI数据: 已上传但无有效数据")
         else:
-            status_lines.append("❌ DHI数据: 未上传")
+            status_lines.append("❌ DHI数据: 未上传 (请到'DHI基础筛选'标签页上传)")
         
         self.monitoring_data_status.setText("\n".join(status_lines))
     
     def get_mastitis_monitoring_formula_html(self):
-        """获取隐形乳房炎监测公式说明HTML"""
+        """获取隐性乳房炎监测公式说明HTML"""
         return """
         <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-            <h3 style="color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 5px;">📊 隐形乳房炎月度监测指标计算公式</h3>
+            <h3 style="color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 5px;">📊 隐性乳房炎月度监测指标计算公式</h3>
             
             <h4 style="color: #e67e22;">1. 当月流行率 (%)</h4>
             <p><strong>公式:</strong> 体细胞数(万/ml) > 阈值的牛头数 ÷ 当月参测牛头数 × 100</p>
@@ -3467,7 +3444,7 @@ class MainWindow(QMainWindow):
         # 次级标签页2: 慢性乳房炎筛查结果
         self.create_mastitis_screening_result_tab()
         
-        # 次级标签页3: 隐形乳房炎监测
+        # 次级标签页3: 隐性乳房炎监测
         self.create_mastitis_monitoring_result_tab()
         
         layout.addWidget(self.result_sub_tabs)
@@ -3519,7 +3496,7 @@ class MainWindow(QMainWindow):
         self.result_sub_tabs.addTab(tab_widget, "🏥 慢性乳房炎筛查")
     
     def create_mastitis_monitoring_result_tab(self):
-        """创建隐形乳房炎监测结果标签页"""
+        """创建隐性乳房炎监测结果标签页"""
         # 检查PyQtGraph依赖
         try:
             import pyqtgraph as pg
@@ -5749,6 +5726,8 @@ class MainWindow(QMainWindow):
                 filter_widget = self.create_other_filter_widget(filter_key, filter_config)
                 self.other_filters_layout.insertWidget(self.other_filters_layout.count() - 1, filter_widget)
                 self.added_other_filters[filter_key] = filter_widget
+                # 动态调整容器高度
+                self.adjust_filters_container_height()
         else:
             # 移除筛选项
             if filter_key in self.added_other_filters:
@@ -5756,6 +5735,8 @@ class MainWindow(QMainWindow):
                 self.other_filters_layout.removeWidget(widget)
                 widget.deleteLater()
                 del self.added_other_filters[filter_key]
+                # 动态调整容器高度
+                self.adjust_filters_container_height()
     
     def quick_add_common_filters(self):
         """一键添加常用筛选项"""
@@ -5790,6 +5771,36 @@ class MainWindow(QMainWindow):
             "应用成功", 
             f"已应用 {selected_count} 个筛选项目\n\n请在下方配置相应的筛选条件。"
         )
+    
+    def adjust_filters_container_height(self):
+        """根据添加的筛选项数量动态调整容器高度"""
+        if not hasattr(self, 'filters_container') or not hasattr(self, 'added_other_filters'):
+            return
+        
+        # 计算所需高度：每个筛选项约120px高度，加上一些边距
+        filter_count = len(self.added_other_filters)
+        if filter_count == 0:
+            # 没有筛选项时，保持最小高度
+            min_height = 50
+            self.filters_container.setMinimumHeight(min_height)
+            self.filters_container.setMaximumHeight(min_height)
+        else:
+            # 根据筛选项数量计算高度
+            item_height = 120  # 每个筛选项的约定高度
+            padding = 20       # 上下边距
+            total_height = filter_count * item_height + padding
+            
+            # 设置最大高度限制（避免过高）
+            max_allowed_height = 600
+            actual_height = min(total_height, max_allowed_height)
+            
+            self.filters_container.setMinimumHeight(actual_height)
+            self.filters_container.setMaximumHeight(actual_height)
+        
+        # 强制重新布局
+        self.filters_container.updateGeometry()
+        if hasattr(self, 'filters_container') and self.filters_container.parent():
+            self.filters_container.parent().updateGeometry()
     
     def add_other_filter(self, text):
         """添加其他筛选项（保留兼容性）"""
@@ -6014,6 +6025,9 @@ class MainWindow(QMainWindow):
                 checkbox.blockSignals(True)  # 阻止信号避免递归调用
                 checkbox.setChecked(False)
                 checkbox.blockSignals(False)
+            
+            # 动态调整容器高度
+            self.adjust_filters_container_height()
     
     def cancel_filtering(self):
         """取消筛选"""

@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-测试隐形乳房炎月度监测模块
+测试隐性乳房炎月度监测模块
 """
 
 import sys
@@ -16,9 +16,9 @@ from mastitis_monitoring import MastitisMonitoringCalculator
 from data_processor import DataProcessor
 
 def test_mastitis_monitoring():
-    """测试隐形乳房炎月度监测功能"""
+    """测试隐性乳房炎月度监测功能"""
     
-    print("=== 测试隐形乳房炎月度监测模块 ===")
+    print("=== 测试隐性乳房炎月度监测模块 ===")
     
     try:
         # 创建监测计算器
@@ -180,7 +180,7 @@ def test_mastitis_monitoring():
                     print(f"  诊断: {pdp.get('diagnosis', '未知')}")
                     print(f"  详细信息: {pdp.get('formula', '无详细信息')}")
         
-        print(f"\n✅ 隐形乳房炎月度监测模块测试完成")
+        print(f"\n✅ 隐性乳房炎月度监测模块测试完成")
         
     except Exception as e:
         print(f"❌ 测试过程出错: {e}")

@@ -2551,6 +2551,8 @@ class MainWindow(QMainWindow):
         basic_filter_layout.setContentsMargins(0, 4, 0, 4)  # 只保留上下4px的细微边距
         basic_filter_layout.setVerticalSpacing(8)  # 适中的表单项间距
         basic_filter_layout.setHorizontalSpacing(10)
+        basic_filter_layout.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)  # 设置标签左对齐
+        basic_filter_layout.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)  # 设置表单左对齐
         
         # 胎次范围筛选
         parity_layout = QHBoxLayout()
@@ -3040,6 +3042,8 @@ class MainWindow(QMainWindow):
         chronic_group = self.create_card_widget("🔬 慢性感染牛识别标准")
         chronic_layout = QFormLayout(getattr(chronic_group, 'content_widget'))
         chronic_layout.setContentsMargins(card_margin, card_margin, card_margin, card_margin)
+        chronic_layout.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)  # 设置标签左对齐
+        chronic_layout.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)  # 设置表单左对齐
         
         # 月份选择设置
         self.chronic_months_widget = QWidget()
@@ -3421,7 +3425,7 @@ class MainWindow(QMainWindow):
         tab_padding_v = max(int(10 * dpi_ratio * 0.6), 8)
         tab_padding_h = max(int(14 * dpi_ratio * 0.6), 10)
         tab_border_radius = max(int(5 * dpi_ratio * 0.6), 4)
-        tab_min_width = max(int(70 * dpi_ratio * 0.6), 50)
+        tab_min_width = max(int(120 * dpi_ratio * 0.6), 100)  # 增大最小宽度，确保中文标签名称完整显示
         
         self.tab_widget.setStyleSheet(f"""
             QTabWidget::pane {{
@@ -3537,13 +3541,18 @@ class MainWindow(QMainWindow):
         
         # 创建次级标签页容器
         self.result_sub_tabs = QTabWidget()
-        self.result_sub_tabs.setStyleSheet("""
-            QTabWidget::pane {
+        # 获取DPI缩放比例
+        screen = QApplication.primaryScreen()
+        dpi_ratio = screen.devicePixelRatio()
+        sub_tab_min_width = max(int(100 * dpi_ratio * 0.6), 80)  # 次级标签页最小宽度
+        
+        self.result_sub_tabs.setStyleSheet(f"""
+            QTabWidget::pane {{
                 border: 1px solid #c0c0c0;
                 border-radius: 4px;
                 background-color: white;
-            }
-            QTabBar::tab {
+            }}
+            QTabBar::tab {{
                 background-color: #f0f0f0;
                 border: 1px solid #c0c0c0;
                 padding: 8px 12px;
@@ -3551,15 +3560,16 @@ class MainWindow(QMainWindow):
                 border-top-left-radius: 4px;
                 border-top-right-radius: 4px;
                 font-size: 12px;
-            }
-            QTabBar::tab:selected {
+                min-width: {sub_tab_min_width}px;
+            }}
+            QTabBar::tab:selected {{
                 background-color: white;
                 border-bottom-color: white;
                 font-weight: bold;
-            }
-            QTabBar::tab:hover {
+            }}
+            QTabBar::tab:hover {{
                 background-color: #e9ecef;
-            }
+            }}
         """)
         
         # 次级标签页1: DHI基础筛选结果 (保留原有的结果表格)
@@ -7161,10 +7171,17 @@ class MainWindow(QMainWindow):
         
         # 配置区域（默认显示）
         config_widget = QWidget()
+        config_widget.setStyleSheet("""
+            QWidget {
+                text-align: left;
+                alignment: left;
+            }
+        """)
         config_layout = QFormLayout(config_widget)
         config_layout.setContentsMargins(20, 10, 10, 10)
         config_layout.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)  # 设置标签左对齐
         config_layout.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)  # 设置表单左对齐
+        config_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)  # 字段扩展策略
         
         # 根据处置办法类型创建对应的配置项
         if method_key == 'cull':  # 淘汰

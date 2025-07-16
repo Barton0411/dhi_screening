@@ -6,12 +6,13 @@
 
 ## [v3.3] - 2025-07-15
 
-### 🔧 架构兼容性重要修复
-- **解决Windows安装架构限制问题**
-  - 修复x86安装包错误提示"只能安装在x64架构"
-  - 正确配置Inno Setup的ArchitecturesAllowed设置
-  - 确保x86版本可在32位和64位Windows系统上安装
-  - 修复GitHub Actions配置中的YAML语法错误
+### 🔧 架构兼容性根本修复 ⭐
+- **彻底解决Windows安装架构限制问题**
+  - 修复主要构建workflow中的Inno Setup配置错误
+  - 将ArchitecturesAllowed从'x64'改为'x86 x64'
+  - 移除ArchitecturesInstallIn64BitMode限制
+  - 确保安装包可在32位和64位Windows系统上正常安装
+  - 升级到v3.3版本，包含所有架构兼容性修复
 
 ### 📋 建立构建规范体系
 - **完善项目构建规则**

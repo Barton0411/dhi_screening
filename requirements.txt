@@ -9,6 +9,12 @@ xlrd==2.0.1
 pydantic==2.5.0
 PyYAML==6.0.1
 
+# 图表库
+pyqtgraph==0.13.3
+
+# 数据库连接
+pymysql==1.1.0
+
 # 认证模块依赖
 requests==2.31.0
 cryptography==41.0.7

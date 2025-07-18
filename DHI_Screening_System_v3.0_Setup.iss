@@ -3,7 +3,7 @@
 ; Copyright (C) 2025 Yili Liquid Milk Research Institute
 
 #define MyAppName "DHI Screening Analysis System"
-#define MyAppNameChinese "DHI筛查助手"
+#define MyAppNameChinese "DHI筛查分析系统"
 #define MyAppVersion "3.0"
 #define MyAppPublisher "Yili Liquid Milk Research Institute"
 #define MyAppURL "https://github.com/Barton0411/dhi_screening"

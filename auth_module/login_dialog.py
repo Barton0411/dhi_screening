@@ -40,16 +40,12 @@ class LoginDialog(QDialog):
         self.setWindowTitle("用户登录 - DHI筛查助手")
         self.setFixedSize(380, 360)
         
-        # 设置窗口标志 - 添加置顶标志
+        # 设置窗口标志 - 移除 WindowStaysOnTopHint 以避免 macOS 问题
         self.setWindowFlags(
             Qt.WindowType.Window |
             Qt.WindowType.WindowTitleHint |
-            Qt.WindowType.WindowCloseButtonHint |
-            Qt.WindowType.WindowStaysOnTopHint
+            Qt.WindowType.WindowCloseButtonHint
         )
-        
-        # 确保窗口始终置顶
-        self.setAttribute(Qt.WidgetAttribute.WA_AlwaysStackOnTop, True)
         
         # 设置窗口图标
         icon_path = Path(__file__).parent.parent / "icon.ico"

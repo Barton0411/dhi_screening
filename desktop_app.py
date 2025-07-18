@@ -25,9 +25,9 @@ from PyQt6.QtWidgets import (
     QListWidgetItem, QFrame, QScrollArea, QMenuBar, QMenu, 
     QDialog, QDialogButtonBox, QSlider, QGridLayout,
     QColorDialog, QInputDialog, QLineEdit, QStyle, QRadioButton,
-    QSizePolicy
+    QSizePolicy, QProgressDialog
 )
-from PyQt6.QtCore import QThread, pyqtSignal, QDate, Qt, QTimer, QSettings
+from PyQt6.QtCore import QThread, pyqtSignal, QDate, Qt, QTimer, QSettings, QPropertyAnimation, QEasingCurve, pyqtProperty, QDateTime
 from PyQt6.QtGui import QIcon, QFont, QPixmap, QColor, QAction
 import yaml
 
@@ -41,6 +41,15 @@ from auth_module.simple_auth_service import SimpleAuthService
 
 # 导入隐性乳房炎监测模块
 from mastitis_monitoring import MastitisMonitoringCalculator
+
+# 导入进度条管理器
+from progress_manager import SmoothProgressDialog, AsyncProgressManager
+
+# 导入图表本地化
+try:
+    from chart_localization import ChinesePlotWidget
+except ImportError:
+    ChinesePlotWidget = None
 
 
 class DisplaySettingsDialog(QDialog):
@@ -564,6 +573,183 @@ class DisplaySettingsDialog(QDialog):
 # BatchFarmIdInputDialog class removed - no longer needed for single-farm uploads
 
 
+class EnhancedProgressDialog(QProgressDialog):
+    """增强版进度条对话框，支持平滑动画和剩余时间估算"""
+    
+    def __init__(self, title, cancel_text, min_val, max_val, parent=None):
+        super().__init__(title, cancel_text, min_val, max_val, parent)
+        self.setWindowTitle("处理中")
+        self.setWindowModality(Qt.WindowModality.WindowModal)
+        self.setAutoClose(True)
+        self.setAutoReset(True)
+        
+        # 初始化时间跟踪
+        self.start_time = QDateTime.currentDateTime()
+        self.last_update_time = self.start_time
+        self.progress_history = []  # 存储(时间, 进度)元组用于计算速度
+        
+        # 创建自定义进度条
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setBar(self.progress_bar)
+        
+        # 设置样式
+        self.setStyleSheet("""
+            QProgressDialog {
+                background-color: #f8f9fa;
+                border: 2px solid #dee2e6;
+                border-radius: 10px;
+                padding: 20px;
+            }
+            QProgressBar {
+                border: 2px solid #0d6efd;
+                border-radius: 5px;
+                text-align: center;
+                font-weight: bold;
+                background-color: #e9ecef;
+                height: 25px;
+            }
+            QProgressBar::chunk {
+                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
+                    stop: 0 #0d6efd, stop: 0.5 #0a58ca, stop: 1 #0d6efd);
+                border-radius: 3px;
+            }
+            QLabel {
+                color: #212529;
+                font-size: 14px;
+                font-weight: 500;
+                margin: 10px 0;
+            }
+            QPushButton {
+                background-color: #dc3545;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                padding: 8px 16px;
+                font-weight: bold;
+                min-width: 80px;
+            }
+            QPushButton:hover {
+                background-color: #bb2d3b;
+            }
+        """)
+        
+        # 创建动画
+        self._animation_value = 0
+        self.animation = QPropertyAnimation(self, b"animationValue")
+        self.animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self.animation.setDuration(500)  # 500ms的平滑过渡
+        
+        # 添加剩余时间标签
+        self.time_label = QLabel("计算剩余时间...")
+        self.setLabel(self.time_label)
+        
+        # 动画计时器
+        self.animation_timer = QTimer()
+        self.animation_timer.timeout.connect(self.update_animation)
+        self.animation_timer.start(30)  # 30ms更新一次，确保流畅
+        
+        self.setMinimumWidth(400)
+        self.setMinimumHeight(150)
+    
+    def get_animationValue(self):
+        return self._animation_value
+    
+    def set_animationValue(self, value):
+        self._animation_value = value
+        self.setValue(int(value))
+    
+    animationValue = pyqtProperty(float, get_animationValue, set_animationValue)
+    
+    def set_smooth_value(self, value):
+        """平滑地设置进度值"""
+        # 记录进度历史
+        current_time = QDateTime.currentDateTime()
+        self.progress_history.append((current_time, value))
+        
+        # 只保留最近10个记录
+        if len(self.progress_history) > 10:
+            self.progress_history.pop(0)
+        
+        # 更新剩余时间估算
+        self.update_time_estimate(value)
+        
+        # 启动平滑动画
+        self.animation.stop()
+        self.animation.setStartValue(self.value())
+        self.animation.setEndValue(value)
+        self.animation.start()
+    
+    def update_time_estimate(self, current_value):
+        """更新剩余时间估算"""
+        if current_value <= 0 or current_value >= self.maximum():
+            self.time_label.setText("处理完成" if current_value >= self.maximum() else "准备中...")
+            return
+        
+        # 计算已用时间
+        elapsed_ms = self.start_time.msecsTo(QDateTime.currentDateTime())
+        
+        # 如果有足够的历史数据，计算平均速度
+        if len(self.progress_history) >= 2:
+            # 使用最近的数据计算速度
+            recent_time, recent_progress = self.progress_history[-1]
+            old_time, old_progress = self.progress_history[0]
+            
+            time_diff_ms = old_time.msecsTo(recent_time)
+            progress_diff = recent_progress - old_progress
+            
+            if progress_diff > 0 and time_diff_ms > 0:
+                # 计算速度（进度/毫秒）
+                speed = progress_diff / time_diff_ms
+                
+                # 计算剩余进度
+                remaining_progress = self.maximum() - current_value
+                
+                # 估算剩余时间
+                remaining_ms = int(remaining_progress / speed)
+                
+                # 格式化时间显示
+                remaining_text = self.format_time(remaining_ms)
+                elapsed_text = self.format_time(elapsed_ms)
+                
+                self.time_label.setText(
+                    f"已用时间: {elapsed_text} | 预计剩余: {remaining_text}"
+                )
+            else:
+                self.time_label.setText(f"已用时间: {self.format_time(elapsed_ms)}")
+        else:
+            self.time_label.setText(f"已用时间: {self.format_time(elapsed_ms)}")
+    
+    def format_time(self, milliseconds):
+        """格式化时间显示"""
+        seconds = milliseconds // 1000
+        
+        if seconds < 60:
+            return f"{seconds}秒"
+        elif seconds < 3600:
+            minutes = seconds // 60
+            secs = seconds % 60
+            return f"{minutes}分{secs}秒"
+        else:
+            hours = seconds // 3600
+            minutes = (seconds % 3600) // 60
+            return f"{hours}小时{minutes}分"
+    
+    def update_animation(self):
+        """更新动画效果"""
+        # 可以在这里添加额外的视觉效果
+        pass
+    
+    def set_label_text(self, text):
+        """设置标签文本同时保留时间信息"""
+        current_time_info = self.time_label.text()
+        if "已用时间" in current_time_info:
+            self.time_label.setText(f"{text}\n{current_time_info}")
+        else:
+            self.time_label.setText(text)
+
+
 class FileProcessThread(QThread):
     """文件处理线程"""
     progress_updated = pyqtSignal(str, int)  # 状态信息, 进度百分比
@@ -595,12 +781,20 @@ class FileProcessThread(QThread):
             farm_ids = set()
             
             for i, (file_path, filename) in enumerate(zip(self.file_paths, self.filenames)):
-                current_progress = 10 + int((i / total_files) * 70)  # 10-80% for file processing
+                base_progress = 10 + int((i / total_files) * 70)  # 10-80% for file processing
                 
                 self.log_updated.emit(f"\n📄 正在处理文件 {i+1}/{total_files}: {filename}")
-                self.progress_updated.emit(f"处理文件 {i+1}/{total_files}: {filename}", current_progress)
+                self.progress_updated.emit(f"处理文件 {i+1}/{total_files}: {filename}", base_progress)
+                
+                # 细分进度：读取文件
+                self.progress_updated.emit(f"正在读取: {filename}", base_progress + 2)
                 
                 try:
+                    # 如果文件很大，添加更多进度更新
+                    file_size = os.path.getsize(file_path) / (1024 * 1024)  # MB
+                    if file_size > 10:
+                        self.progress_updated.emit(f"正在解析大文件: {filename} ({file_size:.1f}MB)", base_progress + 5)
+                    
                     success, message, df = self.processor.process_uploaded_file(file_path, filename)
                     
                     if success and df is not None:
@@ -769,6 +963,10 @@ class FilterThread(QThread):
         """停止筛选"""
         self._should_stop = True
         self.log_updated.emit("⏹️ 用户请求停止筛选...")
+    
+    def request_cancel(self):
+        """请求取消（别名）"""
+        self.stop()
     
     def should_stop(self):
         """检查是否应该停止"""
@@ -1788,7 +1986,13 @@ class MainWindow(QMainWindow):
         account_menu = menubar.addMenu("账号")
         
         # 当前用户显示
-        user_info_action = QAction(f"当前用户: {self.username}", self)
+        user_display = self.username
+        if self.auth_service and hasattr(self.auth_service, 'get_user_name'):
+            full_name = self.auth_service.get_user_name()
+            if full_name and full_name != self.username:
+                user_display = f"{self.username} ({full_name})"
+        
+        user_info_action = QAction(f"当前用户: {user_display}", self)
         user_info_action.setEnabled(False)
         account_menu.addAction(user_info_action)
         
@@ -3958,13 +4162,32 @@ class MainWindow(QMainWindow):
             value_type = 'both'
         
         try:
-            # 执行分析
-            results = self.urea_tracker.analyze(
-                selected_groups=selected_groups,
-                filter_outliers=self.urea_filter_outliers.isChecked(),
-                min_value=self.urea_min_value.value() if self.urea_filter_outliers.isChecked() else 5.0,
-                max_value=self.urea_max_value.value() if self.urea_filter_outliers.isChecked() else 30.0,
-                min_sample_size=self.urea_min_sample.value()
+            # 定义异步分析任务
+            def analyze_task(progress_callback=None, status_callback=None, check_cancelled=None):
+                if status_callback:
+                    status_callback("正在准备分析...")
+                
+                # 执行分析
+                results = self.urea_tracker.analyze(
+                    selected_groups=selected_groups,
+                    filter_outliers=self.urea_filter_outliers.isChecked(),
+                    min_value=self.urea_min_value.value() if self.urea_filter_outliers.isChecked() else 5.0,
+                    max_value=self.urea_max_value.value() if self.urea_filter_outliers.isChecked() else 30.0,
+                    min_sample_size=self.urea_min_sample.value()
+                )
+                
+                if progress_callback:
+                    progress_callback(100)
+                    
+                return results
+            
+            # 使用异步进度管理器执行分析
+            progress_manager = AsyncProgressManager(self)
+            results = progress_manager.execute_with_progress(
+                analyze_task,
+                title="尿素氮追踪分析",
+                cancel_text="取消",
+                total_steps=100
             )
             
             if 'error' in results:
@@ -4053,8 +4276,12 @@ class MainWindow(QMainWindow):
         try:
             import pyqtgraph as pg
             
-            # 创建图表控件
-            self.urea_chart = pg.PlotWidget()
+            # 创建图表控件（使用中文化的图表部件）
+            if ChinesePlotWidget:
+                self.urea_chart = ChinesePlotWidget()
+            else:
+                self.urea_chart = pg.PlotWidget()
+            
             self.urea_chart.setLabel('left', '尿素氮 (mg/dl)', color='black')
             self.urea_chart.setLabel('bottom', '月份', color='black')
             self.urea_chart.showGrid(x=True, y=True, alpha=0.3)
@@ -4098,6 +4325,11 @@ class MainWindow(QMainWindow):
         # 创建数据表格
         data_table = QTableWidget()
         
+        # 设置表格响应式特性
+        data_table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        data_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        data_table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        
         # 从结果中构建表格数据
         results = self.urea_tracking_results['results']
         value_type = self.urea_tracking_results['value_type']
@@ -4118,8 +4350,24 @@ class MainWindow(QMainWindow):
                     item = QTableWidgetItem(str(value))
                     data_table.setItem(row_idx, col_idx, item)
             
-            # 自动调整列宽
+            # 设置列宽调整模式
+            header = data_table.horizontalHeader()
+            # 设置前几列为固定宽度
+            header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # 泌乳天数组
+            # 其他列自动拉伸
+            for i in range(1, data_table.columnCount()):
+                header.setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
+            
+            # 设置最后一列拉伸填充剩余空间
+            header.setStretchLastSection(True)
+            
+            # 初始调整列宽
             data_table.resizeColumnsToContents()
+            
+            # 设置最小列宽
+            for i in range(data_table.columnCount()):
+                if data_table.columnWidth(i) < 80:
+                    data_table.setColumnWidth(i, 80)
         
         table_layout.addWidget(data_table)
         
@@ -4693,7 +4941,10 @@ class MainWindow(QMainWindow):
         right_layout.setSpacing(5)
         
         # 上部：趋势图表
-        self.mastitis_monitoring_plot = pg.PlotWidget()
+        if ChinesePlotWidget:
+            self.mastitis_monitoring_plot = ChinesePlotWidget()
+        else:
+            self.mastitis_monitoring_plot = pg.PlotWidget()
         self.mastitis_monitoring_plot.setLabel('left', '百分比 (%)')
         self.mastitis_monitoring_plot.setLabel('bottom', '月份')
         self.mastitis_monitoring_plot.showGrid(x=True, y=True, alpha=0.3)
@@ -5213,13 +5464,22 @@ class MainWindow(QMainWindow):
             return
         
         self.process_btn.setEnabled(False)
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setValue(0)
+        
+        # 创建增强进度条对话框（使用新的流畅进度条）
+        self.file_progress_dialog = SmoothProgressDialog(
+            "正在处理文件...",
+            "取消",
+            0, 100,
+            self
+        )
+        self.file_progress_dialog.setWindowTitle("文件处理")
+        self.file_progress_dialog.canceled.connect(self.cancel_file_processing)
+        self.file_progress_dialog.show()
         
         # 启动处理线程
         filenames = [os.path.basename(f) for f in self.selected_files]
         self.process_thread = FileProcessThread(self.selected_files, filenames, self.urea_tracker)
-        self.process_thread.progress_updated.connect(self.update_progress)
+        self.process_thread.progress_updated.connect(self.update_file_progress)
         self.process_thread.file_processed.connect(self.file_processed)
         self.process_thread.processing_completed.connect(self.processing_completed)
         self.process_thread.log_updated.connect(self.update_process_log)
@@ -5228,8 +5488,23 @@ class MainWindow(QMainWindow):
         # 切换到处理过程标签页
         self.tab_widget.setCurrentWidget(self.process_log_widget)
     
+    def update_file_progress(self, status, progress):
+        """更新文件处理进度"""
+        if hasattr(self, 'file_progress_dialog'):
+            self.file_progress_dialog.setValue(progress)
+            self.file_progress_dialog.setLabelText(status)
+        self.statusBar().showMessage(status)
+    
+    def cancel_file_processing(self):
+        """取消文件处理"""
+        if hasattr(self, 'process_thread') and self.process_thread.isRunning():
+            self.process_thread.terminate()
+            self.process_thread.wait()
+            self.process_btn.setEnabled(True)
+            self.statusBar().showMessage("文件处理已取消")
+    
     def update_progress(self, status, progress):
-        """更新进度"""
+        """更新进度（兼容旧代码）"""
         # 不更新progress_label，只更新进度条和状态栏
         self.progress_bar.setValue(progress)
         self.statusBar().showMessage(status)
@@ -5259,6 +5534,10 @@ class MainWindow(QMainWindow):
     
     def processing_completed(self, results):
         """所有文件处理完成"""
+        # 关闭进度条对话框
+        if hasattr(self, 'file_progress_dialog'):
+            self.file_progress_dialog.close()
+        
         self.progress_bar.setVisible(False)
         self.process_btn.setEnabled(True)
         
@@ -5628,6 +5907,9 @@ class MainWindow(QMainWindow):
     
     def start_filtering(self):
         """开始筛选"""
+        # 重置筛选完成标志
+        self._filtering_completed = False
+        
         if not self.data_list:
             self.show_warning("警告", "请先处理文件")
             return
@@ -5680,17 +5962,21 @@ class MainWindow(QMainWindow):
         # 显示/隐藏按钮（如果存在）
         if hasattr(self, 'filter_btn'):
             self.filter_btn.setEnabled(False)
-            self.filter_btn.setVisible(False)
-        if hasattr(self, 'cancel_filter_btn'):
-            self.cancel_filter_btn.setEnabled(True)
-            self.cancel_filter_btn.setVisible(True)
-        if hasattr(self, 'filter_progress'):
-            self.filter_progress.setVisible(True)
-            self.filter_progress.setValue(0)
+        
+        # 创建增强进度条对话框（使用新的流畅进度条）
+        self.filter_progress_dialog = SmoothProgressDialog(
+            "正在筛选数据...",
+            "取消",
+            0, 100,
+            self
+        )
+        self.filter_progress_dialog.setWindowTitle("数据筛选")
+        self.filter_progress_dialog.canceled.connect(self.cancel_filtering)
+        self.filter_progress_dialog.show()
         
         # 启动筛选线程（传递processor实例以共享在群牛数据）
         self.filter_thread = FilterThread(self.data_list, filters, selected_files, self.processor, self.urea_tracker)
-        self.filter_thread.progress_updated.connect(self.update_filter_progress)
+        self.filter_thread.progress_updated.connect(self.update_filter_progress_dialog)
         self.filter_thread.filtering_completed.connect(self.filtering_completed)
         self.filter_thread.log_updated.connect(self.update_process_log)
         self.filter_thread.start()
@@ -5791,36 +6077,46 @@ class MainWindow(QMainWindow):
                 'plan_date': QDate.currentDate().addDays(30).toString("yyyy-MM-dd")
             }
         
-        # 尿素氮追踪分析 - 移除启用检查
-        if hasattr(self, 'urea_lactation_groups'):
-            # 收集选中的泌乳天数组
-            selected_groups = []
-            for group_name, checkbox in self.urea_lactation_groups.items():
-                if checkbox.isChecked():
-                    selected_groups.append(group_name)
-            
-            # 获取显示模式
-            if self.urea_arithmetic_radio.isChecked():
-                value_type = 'arithmetic'
-            elif self.urea_weighted_radio.isChecked():
-                value_type = 'weighted'
-            else:
-                value_type = 'both'
-            
-            filters['urea_tracking'] = {
-                'enabled': True,
-                'selected_groups': selected_groups,
-                'filter_outliers': self.urea_filter_outliers.isChecked(),
-                'min_value': self.urea_min_value.value() if self.urea_filter_outliers.isChecked() else 5.0,
-                'max_value': self.urea_max_value.value() if self.urea_filter_outliers.isChecked() else 30.0,
-                'min_sample_size': self.urea_min_sample.value(),
-                'value_type': value_type
-            }
+        # 尿素氮追踪分析 - 不在基础筛选中执行
+        # 尿素氮追踪有独立的"开始分析"按钮，不应在基础筛选中自动执行
+        filters['urea_tracking'] = {
+            'enabled': False  # 基础筛选不执行尿素氮追踪
+        }
         
         return filters
     
+    def update_filter_progress_dialog(self, status, progress):
+        """更新筛选进度对话框"""
+        if hasattr(self, 'filter_progress_dialog'):
+            self.filter_progress_dialog.setValue(progress)
+            self.filter_progress_dialog.setLabelText(status)
+        self.statusBar().showMessage(status)
+    
+    def cancel_filtering(self):
+        """取消筛选"""
+        # 如果筛选已完成，直接返回
+        if hasattr(self, '_filtering_completed') and self._filtering_completed:
+            return
+            
+        # 检查是否有正在运行的筛选线程
+        if hasattr(self, 'filter_thread') and self.filter_thread.isRunning():
+            # 弹出确认对话框
+            reply = QMessageBox.question(
+                self,
+                "确认取消",
+                "确定要取消当前筛选吗？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                self.filter_thread.request_cancel()
+                self.filter_thread.wait()
+                if hasattr(self, 'filter_btn'):
+                    self.filter_btn.setEnabled(True)
+                self.statusBar().showMessage("数据筛选已取消")
+    
     def update_filter_progress(self, status, progress):
-        """更新筛选进度"""
+        """更新筛选进度（兼容旧代码）"""
         if hasattr(self, 'filter_label'):
             self.filter_label.setText(status)
         if hasattr(self, 'filter_progress'):
@@ -5829,6 +6125,18 @@ class MainWindow(QMainWindow):
     
     def filtering_completed(self, success, message, results_df, stats=None):
         """筛选完成"""
+        # 设置标志，表示筛选已完成
+        self._filtering_completed = True
+        
+        # 关闭进度条对话框
+        if hasattr(self, 'filter_progress_dialog'):
+            # 先断开信号连接
+            try:
+                self.filter_progress_dialog.canceled.disconnect()
+            except:
+                pass
+            self.filter_progress_dialog.close()
+        
         self._reset_filter_ui_state()
         
         if success:
@@ -7227,20 +7535,6 @@ class MainWindow(QMainWindow):
             # 动态调整容器高度
             self.adjust_filters_container_height()
     
-    def cancel_filtering(self):
-        """取消筛选"""
-        reply = QMessageBox.question(
-            self,
-            "确认取消",
-            "确定要取消当前筛选吗？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            if hasattr(self, 'filter_thread') and self.filter_thread.isRunning():
-                self.filter_thread.stop()
-                # 等待线程结束，但不要阻塞UI
-                QTimer.singleShot(100, self._check_filter_thread_stopped)
     
     def _check_filter_thread_stopped(self):
         """检查筛选线程是否已停止"""
@@ -7699,11 +7993,15 @@ class MainWindow(QMainWindow):
         )
         
         if file_path:
-            # 显示进度条
-            self.mastitis_progress.setVisible(True)
-            self.progress_status_label.setVisible(True)
-            self.mastitis_progress.setValue(0)
-            self.progress_status_label.setText("正在处理文件...")
+            # 创建进度对话框
+            file_process_dialog = SmoothProgressDialog(
+                f"处理文件: {os.path.basename(file_path)}",
+                "取消",
+                0, 100,
+                self
+            )
+            file_process_dialog.show()
+            file_process_dialog.setLabelText("正在处理文件...")
             
             widget = self.mastitis_file_uploads[file_key]
             widget.file_path = file_path
@@ -7712,45 +8010,44 @@ class MainWindow(QMainWindow):
             widget.status_label.setStyleSheet("color: #28a745; font-size: 12px;")
             
             # 更新进度 - 文件选择完成
-            self.mastitis_progress.setValue(20)
-            self.progress_status_label.setText("正在读取文件信息...")
+            file_process_dialog.setValue(20)
+            file_process_dialog.setLabelText("正在读取文件信息...")
+            QApplication.processEvents()
             
             # 显示文件信息到右侧面板
             self.display_mastitis_file_info(file_key, file_name, file_path)
             
             # 更新进度 - 文件信息读取完成
-            self.mastitis_progress.setValue(50)
+            file_process_dialog.setValue(50)
             
             # 如果是牛群基础信息表，立即处理并保存数据
             if file_key == 'cattle_info':
-                self.progress_status_label.setText("正在处理牛群基础信息...")
-                self.mastitis_progress.setValue(60)
+                file_process_dialog.setLabelText("正在处理牛群基础信息...")
+                file_process_dialog.setValue(60)
+                QApplication.processEvents()
                 
                 # 立即处理牛群基础信息表
                 success = self.process_and_save_cattle_basic_info(file_path)
                 
                 if success:
-                    self.progress_status_label.setText("正在提取繁育状态...")
-                    self.mastitis_progress.setValue(80)
+                    file_process_dialog.setLabelText("正在提取繁育状态...")
+                    file_process_dialog.setValue(80)
+                    QApplication.processEvents()
                     self.extract_and_update_breeding_status(file_path)
-                    self.mastitis_progress.setValue(100)
-                    self.progress_status_label.setText("牛群基础信息处理完成")
+                    file_process_dialog.setValue(100)
+                    file_process_dialog.setLabelText("牛群基础信息处理完成")
                 else:
-                    self.mastitis_progress.setValue(100)
-                    self.progress_status_label.setText("牛群基础信息处理失败")
+                    file_process_dialog.setValue(100)
+                    file_process_dialog.setLabelText("牛群基础信息处理失败")
             else:
-                self.mastitis_progress.setValue(100)
-                self.progress_status_label.setText("文件处理完成")
+                file_process_dialog.setValue(100)
+                file_process_dialog.setLabelText("文件处理完成")
             
-            # 延迟隐藏进度条
-            QTimer.singleShot(2000, lambda: self.hide_progress_bar())
+            # 延迟关闭进度对话框
+            QTimer.singleShot(2000, lambda: file_process_dialog.close())
             
             self.update_mastitis_screen_button_state()
     
-    def hide_progress_bar(self):
-        """隐藏进度条"""
-        self.mastitis_progress.setVisible(False)
-        self.progress_status_label.setVisible(False)
     
 
     def display_mastitis_file_info(self, file_key: str, file_name: str, file_path: str):
@@ -7760,12 +8057,29 @@ class MainWindow(QMainWindow):
             import pandas as pd
             from datetime import datetime
             
+            # 创建进度对话框
+            progress_dialog = SmoothProgressDialog(
+                f"正在读取文件: {os.path.basename(file_path)}",
+                "取消",
+                0, 100,
+                self
+            )
+            progress_dialog.show()
+            
             # 获取文件基本信息
+            progress_dialog.setLabelText("获取文件信息...")
+            progress_dialog.setValue(20)
+            QApplication.processEvents()
+            
             file_size = os.path.getsize(file_path)
             file_size_mb = file_size / (1024 * 1024)
             modified_time = datetime.fromtimestamp(os.path.getmtime(file_path))
             
             # 读取Excel文件获取数据信息
+            progress_dialog.setLabelText("读取文件内容...")
+            progress_dialog.setValue(50)
+            QApplication.processEvents()
+            
             try:
                 if file_key == 'milk_yield' and self.current_mastitis_system == 'yiqiniu':
                     # 奶牛产奶日汇总表可能有多个sheet
@@ -7773,7 +8087,12 @@ class MainWindow(QMainWindow):
                         sheet_names = xls.sheet_names
                         total_rows = 0
                         sheet_info = []
-                        for sheet_name in sheet_names:
+                        for i, sheet_name in enumerate(sheet_names):
+                            progress_value = 50 + int(40 * (i + 1) / len(sheet_names))
+                            progress_dialog.setValue(progress_value)
+                            progress_dialog.setLabelText(f"读取工作表: {sheet_name}")
+                            QApplication.processEvents()
+                            
                             df = pd.read_excel(file_path, sheet_name=sheet_name)
                             total_rows += len(df)
                             sheet_info.append(f"  - {sheet_name}: {len(df)}行")
@@ -7792,6 +8111,9 @@ class MainWindow(QMainWindow):
                         data_info += f"\n列名预览: {columns_preview}"
             except Exception as e:
                 data_info = f"数据信息: 读取失败 - {str(e)}"
+            
+            progress_dialog.setValue(100)
+            progress_dialog.close()
             
             # 构建信息文本
             info_text = f"""
@@ -8412,11 +8734,20 @@ class MainWindow(QMainWindow):
 """
             self.process_log_widget.append(start_message)
             
-            self.mastitis_status_label.setText("正在处理数据文件...")
-            self.mastitis_progress.setVisible(True)
-            self.progress_status_label.setVisible(True)
-            self.mastitis_progress.setValue(0)
-            self.progress_status_label.setText("步骤 1/8: 收集文件路径...")
+            # 创建进度对话框
+            self.mastitis_progress_dialog = SmoothProgressDialog(
+                "慢性乳房炎筛查",
+                "取消",
+                0, 100,
+                self
+            )
+            self.mastitis_progress_dialog.setWindowTitle("慢性乳房炎筛查进度")
+            self.mastitis_progress_dialog.show()
+            
+            # 更新进度
+            self.mastitis_progress_dialog.setLabelText("步骤 1/8: 收集文件路径...")
+            self.mastitis_progress_dialog.setValue(5)
+            QApplication.processEvents()
             
             # 收集文件路径和字段映射
             file_paths = {}
@@ -8434,9 +8765,11 @@ class MainWindow(QMainWindow):
                             field_mappings[file_key][field] = column_name
             
             # 处理系统文件
-            self.mastitis_progress.setValue(10)
-            self.progress_status_label.setText("步骤 2/8: 处理系统文件...")
+            self.mastitis_progress_dialog.setValue(10)
+            self.mastitis_progress_dialog.setLabelText("步骤 2/8: 处理系统文件...")
             self.process_log_widget.append("📂 开始处理系统文件...")
+            QApplication.processEvents()
+            
             success, message, processed_data = self.data_processor.process_mastitis_system_files(
                 self.current_mastitis_system, file_paths, field_mappings
             )
@@ -8445,8 +8778,7 @@ class MainWindow(QMainWindow):
                 error_msg = f"❌ 文件处理失败: {message}"
                 self.process_log_widget.append(error_msg)
                 QMessageBox.warning(self, "文件处理失败", message)
-                self.mastitis_progress.setVisible(False)
-                self.progress_status_label.setVisible(False)
+                self.mastitis_progress_dialog.close()
                 return
             
             self.process_log_widget.append(f"✅ 系统文件处理成功: {message}")
@@ -8461,10 +8793,10 @@ class MainWindow(QMainWindow):
             if hasattr(self, 'update_monitoring_data_status'):
                 self.update_monitoring_data_status()
             
-            self.mastitis_progress.setValue(30)
-            self.progress_status_label.setText("步骤 3/8: 计算最近7天奶量...")
-            self.mastitis_status_label.setText("正在计算关键指标...")
+            self.mastitis_progress_dialog.setValue(30)
+            self.mastitis_progress_dialog.setLabelText("步骤 3/8: 计算最近7天奶量...")
             self.process_log_widget.append("🧮 正在计算关键指标...")
+            QApplication.processEvents()
             
             # 计算最近7天平均奶量（仅伊起牛系统需要）
             if self.current_mastitis_system == 'yiqiniu':
@@ -8476,8 +8808,9 @@ class MainWindow(QMainWindow):
                 )
                 self.process_log_widget.append(f"✅ 完成{len(milk_yield_df)}头牛的奶量计算")
             
-            self.mastitis_progress.setValue(50)
-            self.progress_status_label.setText("步骤 4/8: 统计乳房炎发病...")
+            self.mastitis_progress_dialog.setValue(50)
+            self.mastitis_progress_dialog.setLabelText("步骤 4/8: 统计乳房炎发病...")
+            QApplication.processEvents()
             
             # 计算乳房炎发病次数
             self.process_log_widget.append("🦠 计算乳房炎发病次数...")
@@ -8494,9 +8827,9 @@ class MainWindow(QMainWindow):
             total_cases = mastitis_count_df['mastitis_count'].sum()
             self.process_log_widget.append(f"✅ 发病统计完成: {affected_cows}头牛发病，共{total_cases}次")
             
-            self.mastitis_progress.setValue(70)
-            self.progress_status_label.setText("步骤 6/8: 识别慢性感染牛...")
-            self.mastitis_status_label.setText("正在识别慢性感染牛...")
+            self.mastitis_progress_dialog.setValue(70)
+            self.mastitis_progress_dialog.setLabelText("步骤 6/8: 识别慢性感染牛...")
+            QApplication.processEvents()
             self.process_log_widget.append("🔬 识别慢性感染牛...")
             
             # 收集选中的月份
@@ -8508,8 +8841,7 @@ class MainWindow(QMainWindow):
                 error_msg = "❌ 请至少选择一个月份进行慢性感染牛识别"
                 self.process_log_widget.append(error_msg)
                 self.show_warning("月份选择错误", "请至少选择一个月份进行慢性感染牛识别")
-                self.mastitis_progress.setVisible(False)
-                self.progress_status_label.setVisible(False)
+                self.mastitis_progress_dialog.close()
                 return
             
             self.process_log_widget.append(f"🗓️ 检查月份: {', '.join(selected_months)}")
@@ -8562,10 +8894,10 @@ class MainWindow(QMainWindow):
                 processed_data['cattle_info']['chronic_mastitis'] = False
                 self.process_log_widget.append("ℹ️ 未发现慢性感染牛，所有牛的chronic_mastitis设为False")
             
-            self.mastitis_progress.setValue(85)
-            self.progress_status_label.setText("步骤 7/8: 应用处置办法...")
-            self.mastitis_status_label.setText("正在应用处置办法...")
+            self.mastitis_progress_dialog.setValue(85)
+            self.mastitis_progress_dialog.setLabelText("步骤 7/8: 应用处置办法...")
             self.process_log_widget.append("⚖️ 应用处置办法判断...")
+            QApplication.processEvents()
             
             # 收集处置办法配置
             treatment_config = self.build_treatment_config()
@@ -8577,9 +8909,10 @@ class MainWindow(QMainWindow):
                 processed_data['cattle_info'], treatment_config
             )
             
-            self.mastitis_progress.setValue(95)
-            self.progress_status_label.setText("步骤 8/8: 生成筛查报告...")
+            self.mastitis_progress_dialog.setValue(95)
+            self.mastitis_progress_dialog.setLabelText("步骤 8/8: 生成筛查报告...")
             self.process_log_widget.append("📊 生成筛查报告...")
+            QApplication.processEvents()
             
             # 生成筛查报告
             screening_report = self.data_processor.create_mastitis_screening_report(
@@ -8588,10 +8921,10 @@ class MainWindow(QMainWindow):
                 self.data_list
             )
             
-            self.mastitis_progress.setValue(100)
-            self.progress_status_label.setText("筛查完成！")
-            # 延迟隐藏进度条
-            QTimer.singleShot(3000, lambda: self.hide_progress_bar())
+            self.mastitis_progress_dialog.setValue(100)
+            self.mastitis_progress_dialog.setLabelText("筛查完成！")
+            # 延迟关闭进度对话框
+            QTimer.singleShot(2000, lambda: self.mastitis_progress_dialog.close())
             
             completion_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             
@@ -8634,7 +8967,7 @@ class MainWindow(QMainWindow):
 ❌ 慢性乳房炎筛查任务失败
 """
             self.process_log_widget.append(error_message)
-            self.mastitis_progress.setVisible(False)
+            self.mastitis_progress_dialog.close()
             QMessageBox.critical(self, "筛查失败", f"筛查过程中出现错误：{str(e)}")
             self.mastitis_status_label.setText("筛查失败")
     
@@ -9049,12 +9382,33 @@ class MainWindow(QMainWindow):
                 print(f"   ❌ 跳过牛群基础信息加载：数据不存在")
                 print(f"   💡 提示：如需计算干奶前流行率，请先到'慢性乳房炎筛查'中上传牛群基础信息")
             
+            # 定义异步计算任务
+            def calculate_task(progress_callback=None, status_callback=None, check_cancelled=None):
+                if status_callback:
+                    status_callback("正在计算各项指标...")
+                
+                if progress_callback:
+                    progress_callback(30)
+                
+                results = self.mastitis_monitoring_calculator.calculate_all_indicators()
+                
+                if progress_callback:
+                    progress_callback(100)
+                    
+                return results
+            
             # 执行计算
             self.start_monitoring_btn.setText("计算中...")
             self.start_monitoring_btn.setEnabled(False)
-            QApplication.processEvents()
             
-            results = self.mastitis_monitoring_calculator.calculate_all_indicators()
+            # 使用异步进度管理器执行计算
+            progress_manager = AsyncProgressManager(self)
+            results = progress_manager.execute_with_progress(
+                calculate_task,
+                title="隐性乳房炎监测分析",
+                cancel_text="取消",
+                total_steps=100
+            )
             
             if not results['success']:
                 QMessageBox.critical(self, "错误", f"指标计算失败: {results.get('error', '未知错误')}")
@@ -9512,9 +9866,8 @@ class MainWindow(QMainWindow):
             return
         
         try:
-            # 显示处理进度
-            progress_dialog = QProgressDialog("正在处理DHI文件...", "取消", 0, len(files), self)
-            progress_dialog.setWindowModality(Qt.WindowModal)
+            # 使用新的流畅进度条
+            progress_dialog = SmoothProgressDialog("正在处理DHI文件...", "取消", 0, len(files), self)
             progress_dialog.show()
             
             # 处理DHI文件

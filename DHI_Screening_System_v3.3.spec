@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# DHI筛查分析系统 v3.3 - PyInstaller配置文件
+# DHI筛查助手 v3.3 - PyInstaller配置文件
 # 伊利液奶奶科院
 
 # 应用信息

@@ -24,7 +24,8 @@ from PyQt6.QtWidgets import (
     QTabWidget, QMessageBox, QSplitter, QHeaderView, QListWidget,
     QListWidgetItem, QFrame, QScrollArea, QMenuBar, QMenu, 
     QDialog, QDialogButtonBox, QSlider, QGridLayout,
-    QColorDialog, QInputDialog, QLineEdit, QStyle
+    QColorDialog, QInputDialog, QLineEdit, QStyle, QRadioButton,
+    QSizePolicy
 )
 from PyQt6.QtCore import QThread, pyqtSignal, QDate, Qt, QTimer, QSettings
 from PyQt6.QtGui import QIcon, QFont, QPixmap, QColor, QAction
@@ -37,6 +38,9 @@ from models import FilterConfig
 # 导入认证模块
 from auth_module import LoginDialog, show_login_dialog
 from auth_module.simple_auth_service import SimpleAuthService
+
+# 导入隐性乳房炎监测模块
+from mastitis_monitoring import MastitisMonitoringCalculator
 
 
 class DisplaySettingsDialog(QDialog):
@@ -567,11 +571,12 @@ class FileProcessThread(QThread):
     processing_completed = pyqtSignal(dict)  # 完成信息
     log_updated = pyqtSignal(str)  # 处理过程日志
     
-    def __init__(self, file_paths, filenames):
+    def __init__(self, file_paths, filenames, urea_tracker=None):
         super().__init__()
         self.file_paths = file_paths
         self.filenames = filenames
         self.processor = DataProcessor()
+        self.urea_tracker = urea_tracker
         
     def run(self):
         """运行文件处理"""
@@ -625,6 +630,36 @@ class FileProcessThread(QThread):
                             'filename': filename,
                             'data': df
                         })
+                        
+                        # 添加数据到尿素氮追踪器
+                        if self.urea_tracker and date_range:
+                            # 从日期范围中提取年月
+                            try:
+                                # date_range['year_month_range'] 格式如 "2024年1月 - 2024年3月"
+                                year_month_str = date_range.get('year_month_range', '')
+                                if ' - ' in year_month_str:
+                                    # 取第一个月份作为数据的代表月份
+                                    first_month = year_month_str.split(' - ')[0]
+                                    # 转换为 YYYY-MM 格式
+                                    import re
+                                    match = re.match(r'(\d{4})年(\d{1,2})月', first_month)
+                                    if match:
+                                        year = match.group(1)
+                                        month = match.group(2).zfill(2)
+                                        date_str = f"{year}-{month}"
+                                        self.urea_tracker.add_dhi_data(df, date_str)
+                                        self.log_updated.emit(f"   🧪 已添加到尿素氮追踪: {date_str}")
+                                else:
+                                    # 单月数据
+                                    match = re.match(r'(\d{4})年(\d{1,2})月', year_month_str)
+                                    if match:
+                                        year = match.group(1)
+                                        month = match.group(2).zfill(2)
+                                        date_str = f"{year}-{month}"
+                                        self.urea_tracker.add_dhi_data(df, date_str)
+                                        self.log_updated.emit(f"   🧪 已添加到尿素氮追踪: {date_str}")
+                            except Exception as e:
+                                self.log_updated.emit(f"   ⚠️ 尿素氮数据添加失败: {str(e)}")
                     else:
                         self.log_updated.emit(f"   ❌ 失败: {message}")
                         failed_files.append({
@@ -721,12 +756,13 @@ class FilterThread(QThread):
     filtering_completed = pyqtSignal(bool, str, pd.DataFrame, dict)  # 添加统计信息字典
     log_updated = pyqtSignal(str)  # 筛选过程日志
     
-    def __init__(self, data_list, filters, selected_files, processor=None):
+    def __init__(self, data_list, filters, selected_files, processor=None, urea_tracker=None):
         super().__init__()
         self.data_list = data_list
         self.filters = filters
         self.selected_files = selected_files
         self.processor = processor if processor else DataProcessor()
+        self.urea_tracker = urea_tracker
         self._should_stop = False  # 停止标志
     
     def stop(self):
@@ -896,6 +932,31 @@ class FilterThread(QThread):
                 'active_cattle_count': len(self.processor.active_cattle_list) if self.processor.active_cattle_list else 0
             }
             
+            # 尿素氮追踪分析
+            urea_tracking_config = self.filters.get('urea_tracking', {})
+            if urea_tracking_config.get('enabled', False) and self.urea_tracker:
+                self.progress_updated.emit("执行尿素氮追踪分析...", 95)
+                self.log_updated.emit("\n🧪 执行尿素氮追踪分析...")
+                
+                urea_results = self.urea_tracker.analyze(
+                    selected_groups=urea_tracking_config['selected_groups'],
+                    filter_outliers=urea_tracking_config['filter_outliers'],
+                    min_value=urea_tracking_config['min_value'],
+                    max_value=urea_tracking_config['max_value'],
+                    min_sample_size=urea_tracking_config['min_sample_size']
+                )
+                
+                if 'error' not in urea_results:
+                    stats['urea_tracking'] = {
+                        'results': urea_results,
+                        'value_type': urea_tracking_config['value_type']
+                    }
+                    group_count = len(urea_results)
+                    total_history_points = sum(len(group['history']) for group in urea_results.values())
+                    self.log_updated.emit(f"   ✅ 尿素氮分析完成: {group_count}个组，{total_history_points}个历史数据点")
+                else:
+                    self.log_updated.emit(f"   ❌ 尿素氮分析失败: {urea_results['error']}")
+            
             self.progress_updated.emit("筛选完成", 100)
             
             self.log_updated.emit(f"\n✅ 筛选完成统计:")
@@ -931,6 +992,11 @@ class MainWindow(QMainWindow):
         self.data_processor = self.processor  # 为慢性乳房炎筛查功能提供别名
         self.current_results = pd.DataFrame()  # 当前筛选结果
         self.heartbeat_timer = None  # 心跳定时器
+        
+        # 初始化尿素氮追踪器
+        from urea_tracker import UreaTracker
+        self.urea_tracker = UreaTracker()
+        self.urea_tracking_results = None
         
         # 加载显示设置
         self.settings = QSettings("DHI", "ProteinScreening")
@@ -1205,11 +1271,13 @@ class MainWindow(QMainWindow):
                 font-weight: bold;
             }}
             
+            /* 复选框和单选框不需要选中时的背景 */
+            
             QCheckBox::indicator, QRadioButton::indicator {{
                 width: {self.get_dpi_scaled_size(16)}px;
                 height: {self.get_dpi_scaled_size(16)}px;
-                background-color: {background_color};
-                border: 1px solid {border_color};
+                background-color: white;
+                border: 2px solid #666666;
             }}
             
             QCheckBox::indicator {{
@@ -1220,9 +1288,19 @@ class MainWindow(QMainWindow):
                 border-radius: {self.get_dpi_scaled_size(8)}px;
             }}
             
-            QCheckBox::indicator:checked, QRadioButton::indicator:checked {{
+            QCheckBox::indicator:checked {{
                 background-color: {accent_color};
-                border: 1px solid {accent_color};
+                border: 2px solid {accent_color};
+                image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJ3aGl0ZSI+PHBhdGggZD0iTTkgMTYuMTdMNC44MyAxMmwtMS40MiAxLjQxTDkgMTkgMjEgN2wtMS40MS0xLjQxeiIvPjwvc3ZnPg==);
+            }}
+            
+            QRadioButton::indicator:checked {{
+                background-color: {accent_color};
+                border: 2px solid {accent_color};
+            }}
+            
+            QCheckBox::indicator:hover, QRadioButton::indicator:hover {{
+                border-color: {accent_color};
             }}
             
             /* 表格 */
@@ -1406,6 +1484,130 @@ class MainWindow(QMainWindow):
         """初始化界面"""
         self.setWindowTitle("DHI筛查助手 - 伊利液奶奶科院")
         
+        # 设置全局样式 - 确保所有复选框、单选框、输入框有良好的对比度
+        self.setStyleSheet("""
+            QCheckBox {
+                color: black;
+                background-color: transparent;
+            }
+            QCheckBox::indicator {
+                width: 16px;
+                height: 16px;
+                background-color: white;
+                border: 2px solid #666;
+                border-radius: 3px;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #007AFF;
+                border-color: #007AFF;
+                image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJ3aGl0ZSI+PHBhdGggZD0iTTkgMTYuMTdMNC44MyAxMmwtMS40MiAxLjQxTDkgMTkgMjEgN2wtMS40MS0xLjQxeiIvPjwvc3ZnPg==);
+            }
+            /* 复选框不需要选中时的背景 */
+            QCheckBox::indicator:hover {
+                border-color: #007AFF;
+            }
+            QRadioButton {
+                color: black;
+                background-color: transparent;
+            }
+            /* 单选框不需要选中时的背景 */
+            QRadioButton::indicator {
+                width: 16px;
+                height: 16px;
+                background-color: white;
+                border: 2px solid #666;
+                border-radius: 8px;
+            }
+            QRadioButton::indicator:checked {
+                background-color: #007AFF;
+                border-color: #007AFF;
+            }
+            /* 移除after伪元素，使单选框完全填充 */
+            QSpinBox, QDoubleSpinBox, QLineEdit {
+                background-color: white;
+                color: black;
+                border: 1px solid #ccc;
+                padding: 5px;
+                border-radius: 3px;
+            }
+            QSpinBox:focus, QDoubleSpinBox:focus, QLineEdit:focus {
+                border-color: #007AFF;
+            }
+            QGroupBox {
+                color: black;
+                font-weight: bold;
+                border: 1px solid #ddd;
+                border-radius: 5px;
+                margin-top: 10px;
+                padding-top: 10px;
+                background-color: transparent;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+                background-color: white;
+                color: black;
+            }
+            QLabel {
+                color: black;
+                background-color: transparent;
+            }
+            /* 确保标签页内容区域背景为白色 */
+            QTabWidget::pane {
+                background-color: white;
+            }
+            QWidget {
+                background-color: white;
+            }
+            /* 表格样式 */
+            QTableWidget {
+                background-color: white;
+                color: black;
+                gridline-color: #ddd;
+                selection-background-color: #007AFF;
+                selection-color: white;
+            }
+            QTableWidget::item {
+                color: black;
+                background-color: white;
+            }
+            QTableWidget::item:selected {
+                background-color: #007AFF;
+                color: white;
+            }
+            QHeaderView::section {
+                background-color: #f8f9fa;
+                color: black;
+                font-weight: bold;
+                border: 1px solid #ddd;
+                padding: 5px;
+            }
+            /* 按钮样式 - 确保良好对比度 */
+            QPushButton {
+                background-color: #007AFF;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #0051D5;
+            }
+            QPushButton:pressed {
+                background-color: #0041AB;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+                color: #666666;
+            }
+            /* 特殊按钮样式保持原样 */
+            QPushButton#enableCheckbox {
+                background-color: transparent;
+            }
+        """)
+        
         # 创建菜单栏 - 只创建一次
         self.create_menu_bar()
         
@@ -1477,8 +1679,9 @@ class MainWindow(QMainWindow):
         left_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)     # 按需显示纵向滚动
         
         # 宽度限制 - 确保在不同屏幕上的适配性
-        left_scroll.setMinimumWidth(580)  # 最小宽度580px - 保证内容完整显示
-        left_scroll.setMaximumWidth(800)  # 最大宽度800px - 避免在大屏幕上过度拉伸
+        left_scroll.setMinimumWidth(400)  # 减小最小宽度到400px
+        # 移除最大宽度限制，允许用户自由调整
+        # left_scroll.setMaximumWidth(800)  # 注释掉最大宽度限制
         
         # 🎯 高度策略 - 平衡内容可见性和空间效率的关键设置
         left_scroll.setMinimumHeight(400)  # 降低到400px - 避免文件上传区域过度拉伸
@@ -1492,8 +1695,8 @@ class MainWindow(QMainWindow):
         right_panel.setMinimumWidth(200)  # 减少右侧最小宽度限制，允许拖拽条更灵活
         content_splitter.addWidget(right_panel)
         
-        # 设置分割器比例和约束 - 调整为5:5比例，给左侧更多空间
-        left_width = max(580, int(window_width * 0.5))  # 确保左侧至少580px
+        # 设置分割器比例和约束 - 调整为4:6比例，给右侧更多空间
+        left_width = max(450, int(window_width * 0.4))  # 左侧占40%，至少450px
         right_width = window_width - left_width
         content_splitter.setSizes([left_width, right_width])
         content_splitter.setCollapsible(0, False)
@@ -1909,8 +2112,10 @@ class MainWindow(QMainWindow):
         """)
         
         layout = QHBoxLayout(header)
-        margin = max(int(header_height * 0.25), 15)
-        layout.setContentsMargins(margin, margin, margin, margin)
+        # 减少上下边距，保持左右边距
+        margin_h = max(int(header_height * 0.25), 15)
+        margin_v = max(int(header_height * 0.15), 5)  # 减少垂直边距
+        layout.setContentsMargins(margin_h, margin_v, margin_h, margin_v)
         
         # 左侧图标和标题
         title_layout = QHBoxLayout()
@@ -1921,7 +2126,7 @@ class MainWindow(QMainWindow):
         title_layout.addWidget(icon_label)
         
         # 标题文字
-        title_label = QLabel("DHI筛查分析系统")
+        title_label = QLabel("DHI筛查助手")
         title_label.setStyleSheet(f"""
             font-weight: bold;
             color: white;
@@ -1935,14 +2140,21 @@ class MainWindow(QMainWindow):
         
         # 用户信息区域
         user_layout = QHBoxLayout()
-        user_layout.setSpacing(10)
+        user_layout.setSpacing(8)  # 适中的间距
         
         # 用户图标和名称
         user_icon = QLabel("👤")
         user_icon.setStyleSheet("background: transparent; color: white;")
         user_layout.addWidget(user_icon)
         
-        user_label = QLabel(f"当前用户: {self.username}")
+        # 获取用户姓名
+        user_display = self.username
+        if self.auth_service and hasattr(self.auth_service, 'get_user_name'):
+            full_name = self.auth_service.get_user_name()
+            if full_name and full_name != self.username:
+                user_display = f"{self.username} ({full_name})"
+        
+        user_label = QLabel(f"当前用户: {user_display}")
         user_label.setStyleSheet("""
             color: white;
             background: transparent;
@@ -1954,17 +2166,24 @@ class MainWindow(QMainWindow):
         logout_btn = QPushButton("注销")
         logout_btn.setToolTip("退出登录")
         logout_btn.clicked.connect(self.logout)
+        # 确保按钮有足够的宽度，降低高度
+        logout_btn.setMinimumWidth(70)
+        logout_btn.setMaximumHeight(26)
         logout_btn.setStyleSheet("""
             QPushButton {
                 background-color: rgba(255, 255, 255, 0.2);
                 border: 1px solid rgba(255, 255, 255, 0.3);
-                border-radius: 4px;
+                border-radius: 3px;
                 color: white;
-                padding: 5px 15px;
+                padding: 3px 15px;
                 font-weight: bold;
+                font-size: 13px;
+                min-width: 70px;
+                max-height: 26px;
             }
             QPushButton:hover {
                 background-color: rgba(255, 255, 255, 0.3);
+                border: 1px solid rgba(255, 255, 255, 0.5);
             }
             QPushButton:pressed {
                 background-color: rgba(255, 255, 255, 0.4);
@@ -1997,7 +2216,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(settings_btn)
         
         # 右侧副标题
-        subtitle_label = QLabel("伊利液奶奶科院 | DHI报告筛查分析工具")
+        subtitle_label = QLabel("伊利液奶奶科院 | DHI筛查助手")
         subtitle_label.setStyleSheet(f"""
             color: rgba(255, 255, 255, 0.8);
             background: transparent;
@@ -2409,9 +2628,9 @@ class MainWindow(QMainWindow):
         self.function_tabs = QTabWidget()
         
         # 自适应标签页样式 - 使用优化的DPI适配
-        tab_font_size = self.get_dpi_scaled_font_size(13)
-        tab_padding_v = self.get_dpi_scaled_size(10)
-        tab_padding_h = self.get_dpi_scaled_size(14)
+        tab_font_size = self.get_dpi_scaled_font_size(16)  # 主标签页统一为16px
+        tab_padding_v = self.get_dpi_scaled_size(12)
+        tab_padding_h = self.get_dpi_scaled_size(20)
         tab_border_radius = self.get_dpi_scaled_size(5)
         
         self.function_tabs.setStyleSheet(f"""
@@ -2431,7 +2650,8 @@ class MainWindow(QMainWindow):
                 font-size: {tab_font_size}px;
                 font-weight: 500;
                 color: #495057;
-                min-width: 80px;
+                min-width: 120px;
+                min-height: 35px;
             }}
             QTabBar::tab:selected {{
                 background-color: white;
@@ -3445,6 +3665,606 @@ class MainWindow(QMainWindow):
         self.mastitis_monitoring_results = None
         
         self.function_tabs.addTab(tab_widget, "👁️ 隐性乳房炎监测")
+        
+        # 创建尿素氮追踪标签页
+        self.create_urea_tracking_tab()
+    
+    def create_urea_tracking_tab(self):
+        """创建尿素氮追踪标签页"""
+        tab_widget = QWidget()
+        tab_layout = QVBoxLayout(tab_widget)
+        tab_layout.setContentsMargins(20, 20, 20, 20)
+        tab_layout.setSpacing(15)
+        
+        # 功能说明按钮
+        help_btn = QPushButton("❓ 说明")
+        help_btn.setObjectName("helpButton")
+        help_btn.clicked.connect(self.show_urea_tracking_help)
+        help_btn.setMaximumWidth(120)
+        # 强制设置按钮样式，确保文字是黑色
+        help_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f8f9fa;
+                color: black;
+                border: 1px solid #dee2e6;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #e9ecef;
+                border-color: #adb5bd;
+            }
+            QPushButton:pressed {
+                background-color: #dee2e6;
+            }
+        """)
+        tab_layout.addWidget(help_btn, alignment=Qt.AlignmentFlag.AlignRight)
+        
+        # 移除启用开关，因为不需要
+        
+        # 分析设置组
+        analysis_group = QGroupBox("分析设置")
+        analysis_layout = QVBoxLayout(analysis_group)
+        
+        self.urea_arithmetic_radio = QRadioButton("算术平均值")
+        self.urea_weighted_radio = QRadioButton("加权平均值")
+        self.urea_both_radio = QRadioButton("同时显示两者（默认）")
+        self.urea_both_radio.setChecked(True)
+        
+        analysis_layout.addWidget(self.urea_arithmetic_radio)
+        analysis_layout.addWidget(self.urea_weighted_radio)
+        analysis_layout.addWidget(self.urea_both_radio)
+        
+        tab_layout.addWidget(analysis_group)
+        
+        # 数据筛选组
+        filter_group = QGroupBox("数据筛选")
+        filter_layout = QGridLayout(filter_group)
+        
+        self.urea_filter_outliers = QCheckBox("筛选异常值")
+        self.urea_filter_outliers.toggled.connect(self.on_urea_filter_toggled)
+        filter_layout.addWidget(self.urea_filter_outliers, 0, 0, 1, 2)
+        
+        filter_layout.addWidget(QLabel("尿素氮范围："), 1, 0, 1, 2)
+        
+        filter_layout.addWidget(QLabel("最小值："), 2, 0)
+        self.urea_min_value = QSpinBox()
+        self.urea_min_value.setRange(0, 50)
+        self.urea_min_value.setValue(5)
+        self.urea_min_value.setSuffix(" mg/dl")
+        self.urea_min_value.setEnabled(False)
+        filter_layout.addWidget(self.urea_min_value, 2, 1)
+        
+        filter_layout.addWidget(QLabel("最大值："), 3, 0)
+        self.urea_max_value = QSpinBox()
+        self.urea_max_value.setRange(0, 100)
+        self.urea_max_value.setValue(30)
+        self.urea_max_value.setSuffix(" mg/dl")
+        self.urea_max_value.setEnabled(False)
+        filter_layout.addWidget(self.urea_max_value, 3, 1)
+        
+        tab_layout.addWidget(filter_group)
+        
+        # 泌乳天数分组
+        lactation_group = QGroupBox("泌乳天数分组")
+        lactation_layout = QVBoxLayout(lactation_group)
+        
+        # 创建分组复选框
+        self.urea_lactation_groups = {}
+        groups = [
+            "1-30天", "31-60天", "61-90天", "91-120天",
+            "121-150天", "151-180天", "181-210天", "211-240天",
+            "241-270天", "271-300天", "301-330天", "331天以上"
+        ]
+        
+        # 使用网格布局显示分组
+        groups_widget = QWidget()
+        groups_grid = QGridLayout(groups_widget)
+        groups_grid.setSpacing(10)
+        
+        for i, group in enumerate(groups):
+            checkbox = QCheckBox(group)
+            checkbox.setChecked(True)  # 默认全选
+            self.urea_lactation_groups[group] = checkbox
+            groups_grid.addWidget(checkbox, i // 3, i % 3)
+        
+        lactation_layout.addWidget(groups_widget)
+        
+        # 全选/清除按钮
+        btn_layout = QHBoxLayout()
+        select_all_btn = QPushButton("全选")
+        select_all_btn.clicked.connect(lambda: self.toggle_urea_groups(True))
+        clear_all_btn = QPushButton("清除")
+        clear_all_btn.clicked.connect(lambda: self.toggle_urea_groups(False))
+        btn_layout.addWidget(select_all_btn)
+        btn_layout.addWidget(clear_all_btn)
+        btn_layout.addStretch()
+        lactation_layout.addLayout(btn_layout)
+        
+        tab_layout.addWidget(lactation_group)
+        
+        # 最少样本数设置
+        sample_layout = QHBoxLayout()
+        sample_layout.addWidget(QLabel("最少样本数："))
+        self.urea_min_sample = QSpinBox()
+        self.urea_min_sample.setRange(1, 50)
+        self.urea_min_sample.setValue(5)
+        self.urea_min_sample.setSuffix("头")
+        sample_layout.addWidget(self.urea_min_sample)
+        sample_layout.addWidget(QLabel("（少于此数量的组不显示）"))
+        sample_layout.addStretch()
+        tab_layout.addLayout(sample_layout)
+        
+        # 分析按钮
+        btn_layout = QHBoxLayout()
+        
+        # 开始分析按钮
+        self.urea_analyze_btn = QPushButton("开始分析")
+        self.urea_analyze_btn.setEnabled(False)  # 默认禁用，直到有数据
+        self.urea_analyze_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #28a745;
+                color: white;
+                font-weight: bold;
+                padding: 10px 20px;
+                border-radius: 5px;
+                min-height: 35px;
+            }
+            QPushButton:hover {
+                background-color: #218838;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+            }
+        """)
+        self.urea_analyze_btn.clicked.connect(self.perform_urea_tracking_analysis)
+        btn_layout.addWidget(self.urea_analyze_btn)
+        
+        # 导出Excel按钮  
+        self.urea_export_btn = QPushButton("导出Excel")
+        self.urea_export_btn.setEnabled(False)  # 默认禁用，直到有结果
+        self.urea_export_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #17a2b8;
+                color: white;
+                font-weight: bold;
+                padding: 10px 20px;
+                border-radius: 5px;
+                min-height: 35px;
+            }
+            QPushButton:hover {
+                background-color: #138496;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+            }
+        """)
+        self.urea_export_btn.clicked.connect(self.export_urea_tracking_results)
+        btn_layout.addWidget(self.urea_export_btn)
+        
+        btn_layout.addStretch()
+        tab_layout.addLayout(btn_layout)
+        
+        # 添加弹性空间
+        tab_layout.addStretch()
+        
+        self.function_tabs.addTab(tab_widget, "🧪 尿素氮追踪")
+    
+    def show_urea_tracking_help(self):
+        """显示尿素氮追踪功能说明"""
+        help_text = """
+        <h2>尿素氮追踪分析说明</h2>
+        
+        <h3>功能概述</h3>
+        <p>本功能通过追踪不同泌乳阶段牛群的尿素氮水平变化，帮助您优化日粮配方和蛋白质利用效率。</p>
+        
+        <h3>分析逻辑</h3>
+        <ol>
+            <li><b>分组依据</b>：基于最新一次DHI数据中每头牛的泌乳天数进行分组<br>
+                例如：2024年4月数据中，泌乳天数75天的牛被分到"2024年4月 61-90天"组</li>
+            <li><b>历史追踪</b>：
+                <ul>
+                    <li>确定当前组内的牛只（如50头）</li>
+                    <li>在历史DHI数据中查找这些牛的尿素氮记录</li>
+                    <li>如某月只有30头有数据，则计算这30头的平均值</li>
+                </ul>
+            </li>
+            <li><b>计算方法</b>：
+                <ul>
+                    <li>算术平均：所有牛只尿素氮值的简单平均</li>
+                    <li>加权平均：考虑产奶量的加权平均<br>
+                        公式：Σ(尿素氮×产奶量) / Σ(产奶量)</li>
+                </ul>
+            </li>
+        </ol>
+        
+        <h3>使用说明</h3>
+        <ol>
+            <li>确保已在"基础数据"中上传多个月份的DHI数据</li>
+            <li>选择要分析的泌乳天数组</li>
+            <li>设置异常值筛选范围（可选）</li>
+            <li>点击主界面的"开始筛选"按钮</li>
+            <li>在"筛选结果-尿素氮追踪"查看结果</li>
+        </ol>
+        
+        <h3>结果解读</h3>
+        <ul>
+            <li><b>上升趋势</b>：可能表示日粮蛋白过量或瘤胃能量不足</li>
+            <li><b>下降趋势</b>：日粮调整有效，蛋白利用率提高</li>
+            <li><b>正常范围</b>：一般为12-18 mg/dl</li>
+        </ul>
+        
+        <h3>注意事项</h3>
+        <ul>
+            <li>分组基于最新数据，历史数据仅用于趋势分析</li>
+            <li>样本数过少的组可能导致数据波动较大</li>
+        </ul>
+        """
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("尿素氮追踪功能说明")
+        dialog.setMinimumSize(800, 600)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # 使用 QTextEdit 显示 HTML
+        text_edit = QTextEdit()
+        text_edit.setReadOnly(True)
+        text_edit.setHtml(help_text)
+        layout.addWidget(text_edit)
+        
+        # 关闭按钮
+        close_btn = QPushButton("关闭")
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        
+        dialog.exec()
+    
+    def on_urea_filter_toggled(self, checked):
+        """切换异常值筛选时启用/禁用输入框"""
+        self.urea_min_value.setEnabled(checked)
+        self.urea_max_value.setEnabled(checked)
+    
+    def toggle_urea_groups(self, select_all):
+        """全选或清除尿素氮分组"""
+        for checkbox in self.urea_lactation_groups.values():
+            checkbox.setChecked(select_all)
+    
+    def perform_urea_tracking_analysis(self):
+        """执行尿素氮追踪分析"""
+        # 移除启用检查，直接进行分析
+        
+        if not self.urea_tracker.dhi_data_dict:
+            QMessageBox.warning(self, "警告", "没有可用的DHI数据，请先上传DHI文件")
+            return
+        
+        # 收集选中的泌乳天数组
+        selected_groups = []
+        for group_name, checkbox in self.urea_lactation_groups.items():
+            if checkbox.isChecked():
+                selected_groups.append(group_name)
+        
+        if not selected_groups:
+            QMessageBox.warning(self, "警告", "请至少选择一个泌乳天数组")
+            return
+        
+        # 获取显示模式
+        if self.urea_arithmetic_radio.isChecked():
+            value_type = 'arithmetic'
+        elif self.urea_weighted_radio.isChecked():
+            value_type = 'weighted'
+        else:
+            value_type = 'both'
+        
+        try:
+            # 执行分析
+            results = self.urea_tracker.analyze(
+                selected_groups=selected_groups,
+                filter_outliers=self.urea_filter_outliers.isChecked(),
+                min_value=self.urea_min_value.value() if self.urea_filter_outliers.isChecked() else 5.0,
+                max_value=self.urea_max_value.value() if self.urea_filter_outliers.isChecked() else 30.0,
+                min_sample_size=self.urea_min_sample.value()
+            )
+            
+            if 'error' in results:
+                QMessageBox.warning(self, "警告", results['error'])
+                return
+            
+            if not results:
+                QMessageBox.information(self, "提示", "没有符合条件的数据")
+                return
+            
+            # 保存结果
+            self.urea_tracking_results = {
+                'results': results,
+                'value_type': value_type
+            }
+            
+            # 在结果标签页中添加尿素氮追踪标签
+            self.add_urea_tracking_tab()
+            
+            # 启用导出按钮
+            self.urea_export_btn.setEnabled(True)
+            
+            # 显示成功消息
+            group_count = len(results)
+            total_history_points = sum(len(group['history']) for group in results.values())
+            QMessageBox.information(
+                self, 
+                "分析完成", 
+                f"尿素氮追踪分析完成！\n\n"
+                f"分析了 {group_count} 个泌乳天数组\n"
+                f"共 {total_history_points} 个历史数据点\n\n"
+                f"请查看右侧'筛选结果'中的'尿素氮追踪'标签页"
+            )
+            
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"分析失败: {str(e)}")
+    
+    def create_urea_tracking_result_tab(self):
+        """创建尿素氮追踪结果标签页（初始为空）"""
+        tab_widget = QWidget()
+        tab_layout = QVBoxLayout(tab_widget)
+        
+        # 创建一个占位标签
+        placeholder = QLabel("尿素氮追踪分析结果将在这里显示\n\n请先上传DHI数据，然后在左侧'尿素氮追踪'标签页中点击'开始分析'")
+        placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        placeholder.setStyleSheet("""
+            QLabel {
+                color: #666;
+                font-size: 14px;
+                padding: 50px;
+            }
+        """)
+        tab_layout.addWidget(placeholder)
+        
+        # 保存占位符引用，以便后续替换
+        self.urea_placeholder = placeholder
+        self.urea_result_tab_widget = tab_widget
+        self.urea_result_tab_layout = tab_layout
+        
+        self.result_sub_tabs.addTab(tab_widget, "🧪 尿素氮追踪")
+    
+    def add_urea_tracking_tab(self):
+        """更新尿素氮追踪结果标签页的内容"""
+        if not self.urea_tracking_results or not hasattr(self, 'urea_result_tab_layout'):
+            return
+        
+        # 清空现有内容
+        while self.urea_result_tab_layout.count():
+            child = self.urea_result_tab_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+        
+        # 创建分割器
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        
+        # 上部分：图表显示
+        chart_widget = QWidget()
+        chart_layout = QVBoxLayout(chart_widget)
+        
+        # 图表标题
+        chart_title = QLabel("尿素氮历史趋势图")
+        chart_title.setStyleSheet("font-size: 16px; font-weight: bold; padding: 10px;")
+        chart_layout.addWidget(chart_title)
+        
+        # 创建pyqtgraph图表
+        try:
+            import pyqtgraph as pg
+            
+            # 创建图表控件
+            self.urea_chart = pg.PlotWidget()
+            self.urea_chart.setLabel('left', '尿素氮 (mg/dl)', color='black')
+            self.urea_chart.setLabel('bottom', '月份', color='black')
+            self.urea_chart.showGrid(x=True, y=True, alpha=0.3)
+            self.urea_chart.setMinimumHeight(250)
+            
+            # 设置图表背景色和轴颜色
+            self.urea_chart.setBackground('white')
+            axis_pen = pg.mkPen(color='black', width=1)
+            self.urea_chart.getAxis('left').setPen(axis_pen)
+            self.urea_chart.getAxis('left').setTextPen('black')
+            self.urea_chart.getAxis('bottom').setPen(axis_pen)
+            self.urea_chart.getAxis('bottom').setTextPen('black')
+            
+            # 设置图例样式
+            legend = self.urea_chart.addLegend()
+            legend.setBrush(pg.mkBrush(255, 255, 255, 200))  # 白色半透明背景
+            legend.setPen(pg.mkPen(0, 0, 0))  # 黑色边框
+            
+            # 绘制数据
+            self.plot_urea_tracking_data()
+            
+            chart_layout.addWidget(self.urea_chart)
+        except ImportError:
+            # 如果没有安装pyqtgraph，显示提示信息
+            chart_placeholder = QTextEdit()
+            chart_placeholder.setReadOnly(True)
+            chart_placeholder.setPlainText("图表功能需要安装pyqtgraph库\n\n请运行: pip install pyqtgraph")
+            chart_layout.addWidget(chart_placeholder)
+        
+        splitter.addWidget(chart_widget)
+        
+        # 下部分：数据表格
+        table_widget = QWidget()
+        table_layout = QVBoxLayout(table_widget)
+        
+        # 表格标题
+        table_title = QLabel("尿素氮分析数据表")
+        table_title.setStyleSheet("font-size: 16px; font-weight: bold; padding: 10px;")
+        table_layout.addWidget(table_title)
+        
+        # 创建数据表格
+        data_table = QTableWidget()
+        
+        # 从结果中构建表格数据
+        results = self.urea_tracking_results['results']
+        value_type = self.urea_tracking_results['value_type']
+        
+        # 获取汇总DataFrame
+        summary_df = self.urea_tracker.get_summary_dataframe(results)
+        
+        if not summary_df.empty:
+            # 设置表格
+            data_table.setRowCount(len(summary_df))
+            data_table.setColumnCount(len(summary_df.columns))
+            data_table.setHorizontalHeaderLabels(summary_df.columns.tolist())
+            
+            # 填充数据
+            for row_idx in range(len(summary_df)):
+                for col_idx in range(len(summary_df.columns)):
+                    value = summary_df.iloc[row_idx, col_idx]
+                    item = QTableWidgetItem(str(value))
+                    data_table.setItem(row_idx, col_idx, item)
+            
+            # 自动调整列宽
+            data_table.resizeColumnsToContents()
+        
+        table_layout.addWidget(data_table)
+        
+        splitter.addWidget(table_widget)
+        
+        # 设置分割比例
+        splitter.setSizes([300, 400])
+        
+        self.urea_result_tab_layout.addWidget(splitter)
+        
+        # 切换到尿素氮追踪标签页
+        for i in range(self.result_sub_tabs.count()):
+            if self.result_sub_tabs.tabText(i) == "🧪 尿素氮追踪":
+                self.result_sub_tabs.setCurrentIndex(i)
+                break
+        
+        # 同时切换主标签页到筛选结果
+        for i in range(self.tab_widget.count()):
+            if self.tab_widget.tabText(i) == "📊 筛选结果":
+                self.tab_widget.setCurrentIndex(i)
+                break
+    
+    def plot_urea_tracking_data(self):
+        """绘制尿素氮追踪数据图表"""
+        if not self.urea_tracking_results or not hasattr(self, 'urea_chart'):
+            return
+        
+        try:
+            import pyqtgraph as pg
+            
+            # 清空现有图表
+            self.urea_chart.clear()
+            
+            # 获取数据
+            results = self.urea_tracking_results['results']
+            value_type = self.urea_tracking_results['value_type']
+            
+            # 获取图表数据
+            chart_data = self.urea_tracker.get_chart_data(results, value_type)
+            
+            if not chart_data['dates']:
+                return
+            
+            # 准备X轴数据（月份索引）
+            x_values = list(range(len(chart_data['dates'])))
+            
+            # 颜色列表
+            colors = [
+                (255, 0, 0),      # 红色
+                (0, 255, 0),      # 绿色
+                (0, 0, 255),      # 蓝色
+                (255, 255, 0),    # 黄色
+                (255, 0, 255),    # 品红
+                (0, 255, 255),    # 青色
+                (255, 128, 0),    # 橙色
+                (128, 0, 255),    # 紫色
+                (0, 128, 255),    # 天蓝
+                (255, 0, 128),    # 玫红
+                (128, 255, 0),    # 黄绿
+                (128, 128, 255),  # 淡紫
+            ]
+            
+            # 绘制每个系列的数据
+            for i, series in enumerate(chart_data['series']):
+                # 过滤掉None值
+                valid_points = []
+                valid_x = []
+                for j, value in enumerate(series['data']):
+                    if value is not None:
+                        valid_points.append(value)
+                        valid_x.append(x_values[j])
+                
+                if valid_points:
+                    color = colors[i % len(colors)]
+                    pen = pg.mkPen(color=color, width=2)
+                    
+                    # 绘制线条
+                    self.urea_chart.plot(
+                        valid_x, valid_points,
+                        pen=pen,
+                        symbol='o',
+                        symbolSize=8,
+                        symbolBrush=color,
+                        name=series['name']
+                    )
+            
+            # 设置X轴标签
+            x_axis = self.urea_chart.getAxis('bottom')
+            x_axis.setTicks([[(i, date) for i, date in enumerate(chart_data['dates'])]])
+            
+            # 设置Y轴范围
+            self.urea_chart.setYRange(0, 35)  # 尿素氮的合理范围
+            
+        except Exception as e:
+            logger.error(f"绘制尿素氮图表失败: {e}")
+            print(f"绘制尿素氮图表失败: {e}")
+    
+    def export_urea_tracking_results(self):
+        """导出尿素氮追踪结果到Excel"""
+        if not self.urea_tracking_results:
+            QMessageBox.warning(self, "警告", "没有可导出的尿素氮追踪结果")
+            return
+        
+        try:
+            # 选择保存文件
+            filename, _ = QFileDialog.getSaveFileName(
+                self,
+                "保存尿素氮追踪结果",
+                f"尿素氮追踪分析_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                "Excel文件 (*.xlsx)"
+            )
+            
+            if not filename:
+                return
+            
+            # 创建Excel写入器
+            with pd.ExcelWriter(filename, engine='openpyxl') as writer:
+                # 1. 汇总表
+                results = self.urea_tracking_results['results']
+                summary_df = self.urea_tracker.get_summary_dataframe(results)
+                if not summary_df.empty:
+                    summary_df.to_excel(writer, sheet_name='汇总数据', index=False)
+                
+                # 2. 详细牛只清单
+                detail_df = self.urea_tracker.get_detail_dataframe(results)
+                if not detail_df.empty:
+                    detail_df.to_excel(writer, sheet_name='详细牛只清单', index=False)
+                
+                # 3. 分析说明
+                info_data = {
+                    '项目': ['分析时间', '最新数据月份', '分析组数', '总记录数'],
+                    '值': [
+                        datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                        self.urea_tracker.latest_date or '无',
+                        len(results),
+                        len(detail_df) if not detail_df.empty else 0
+                    ]
+                }
+                info_df = pd.DataFrame(info_data)
+                info_df.to_excel(writer, sheet_name='分析信息', index=False)
+            
+            QMessageBox.information(self, "成功", f"尿素氮追踪结果已导出到:\n{filename}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"导出失败: {str(e)}")
     
     def update_monitoring_data_status(self):
         """更新隐性乳房炎监测的数据状态显示 - 取消所有状态显示"""
@@ -3545,11 +4365,11 @@ class MainWindow(QMainWindow):
         screen = QApplication.primaryScreen()
         dpi_ratio = screen.devicePixelRatio()
         
-        tab_font_size = max(int(13 * dpi_ratio * 0.7), 12)
+        tab_font_size = self.get_dpi_scaled_font_size(16)  # 主标签页统一为16px
         tab_padding_v = max(int(10 * dpi_ratio * 0.6), 8)
         tab_padding_h = max(int(14 * dpi_ratio * 0.6), 10)
         tab_border_radius = max(int(5 * dpi_ratio * 0.6), 4)
-        tab_min_width = max(int(200 * dpi_ratio * 0.6), 200)  # 增大最小宽度，确保中文标签名称完整显示
+        tab_min_width = 120  # 与左侧标签宽度统一
         
         self.tab_widget.setStyleSheet(f"""
             QTabWidget::pane {{
@@ -3569,6 +4389,7 @@ class MainWindow(QMainWindow):
                 font-weight: 500;
                 color: #495057;
                 min-width: {tab_min_width}px;
+                min-height: 35px;
             }}
             QTabBar::tab:selected {{
                 background-color: white;
@@ -3585,7 +4406,7 @@ class MainWindow(QMainWindow):
         # 文件信息标签页
         self.file_info_widget = QTextEdit()
         self.file_info_widget.setReadOnly(True)
-        info_font_size = max(int(14 * dpi_ratio * 0.8), 12)
+        info_font_size = 13  # 统一字体大小为13px
         info_padding = max(int(12 * dpi_ratio * 0.6), 10)
         self.file_info_widget.setStyleSheet(f"""
             QTextEdit {{
@@ -3679,12 +4500,13 @@ class MainWindow(QMainWindow):
             QTabBar::tab {{
                 background-color: #f0f0f0;
                 border: 1px solid #c0c0c0;
-                padding: 8px 12px;
+                padding: 10px 16px;
                 margin-right: 2px;
                 border-top-left-radius: 4px;
                 border-top-right-radius: 4px;
-                font-size: 12px;
-                min-width: {sub_tab_min_width}px;
+                font-size: 13px;
+                min-width: 100px;
+                min-height: 30px;
             }}
             QTabBar::tab:selected {{
                 background-color: white;
@@ -3731,6 +4553,9 @@ class MainWindow(QMainWindow):
         
         # 次级标签页3: 隐性乳房炎监测
         self.create_mastitis_monitoring_result_tab()
+        
+        # 次级标签页4: 尿素氮追踪
+        self.create_urea_tracking_result_tab()
         
         layout.addWidget(self.result_sub_tabs)
         return result_widget
@@ -3994,11 +4819,11 @@ class MainWindow(QMainWindow):
         screen = QApplication.primaryScreen()
         dpi_ratio = screen.devicePixelRatio()
         
-        tab_font_size = max(int(12 * dpi_ratio * 0.7), 11)
-        tab_padding_v = max(int(8 * dpi_ratio * 0.6), 6)
-        tab_padding_h = max(int(12 * dpi_ratio * 0.6), 8)
-        tab_border_radius = max(int(4 * dpi_ratio * 0.6), 3)
-        tab_min_width = max(int(60 * dpi_ratio * 0.6), 45)
+        tab_font_size = 13  # 与其他次级标签页一致
+        tab_padding_v = 10
+        tab_padding_h = 16
+        tab_border_radius = 4
+        tab_min_width = 100  # 与其他次级标签页一致
         
         self.stats_tab_widget.setStyleSheet(f"""
             QTabWidget::pane {{
@@ -4018,6 +4843,7 @@ class MainWindow(QMainWindow):
                 font-weight: 500;
                 color: #0c5460;
                 min-width: {tab_min_width}px;
+                min-height: 30px;
             }}
             QTabBar::tab:selected {{
                 background-color: white;
@@ -4078,7 +4904,7 @@ class MainWindow(QMainWindow):
         # 获取屏幕DPI信息
         screen = QApplication.primaryScreen()
         dpi_ratio = screen.devicePixelRatio()
-        stats_font_size = max(int(11 * dpi_ratio * 0.7), 10)
+        stats_font_size = 13  # 统一字体大小为13px
         stats_padding = max(int(8 * dpi_ratio * 0.6), 6)
         
         # 通用文本框样式
@@ -4392,7 +5218,7 @@ class MainWindow(QMainWindow):
         
         # 启动处理线程
         filenames = [os.path.basename(f) for f in self.selected_files]
-        self.process_thread = FileProcessThread(self.selected_files, filenames)
+        self.process_thread = FileProcessThread(self.selected_files, filenames, self.urea_tracker)
         self.process_thread.progress_updated.connect(self.update_progress)
         self.process_thread.file_processed.connect(self.file_processed)
         self.process_thread.processing_completed.connect(self.processing_completed)
@@ -4509,6 +5335,10 @@ class MainWindow(QMainWindow):
             self.update_chronic_months_options(sorted_months)
         else:
             print("未找到包含体细胞数据的DHI文件，无法更新月份选择")
+        
+        # 如果尿素氮追踪器有数据，启用分析按钮
+        if hasattr(self, 'urea_analyze_btn') and self.urea_tracker.dhi_data_dict:
+            self.urea_analyze_btn.setEnabled(True)
     
     def detect_and_display_duplicates(self):
         """检测重复文件并在文件信息框中显示详细信息"""
@@ -4859,7 +5689,7 @@ class MainWindow(QMainWindow):
             self.filter_progress.setValue(0)
         
         # 启动筛选线程（传递processor实例以共享在群牛数据）
-        self.filter_thread = FilterThread(self.data_list, filters, selected_files, self.processor)
+        self.filter_thread = FilterThread(self.data_list, filters, selected_files, self.processor, self.urea_tracker)
         self.filter_thread.progress_updated.connect(self.update_filter_progress)
         self.filter_thread.filtering_completed.connect(self.filtering_completed)
         self.filter_thread.log_updated.connect(self.update_process_log)
@@ -4961,6 +5791,32 @@ class MainWindow(QMainWindow):
                 'plan_date': QDate.currentDate().addDays(30).toString("yyyy-MM-dd")
             }
         
+        # 尿素氮追踪分析 - 移除启用检查
+        if hasattr(self, 'urea_lactation_groups'):
+            # 收集选中的泌乳天数组
+            selected_groups = []
+            for group_name, checkbox in self.urea_lactation_groups.items():
+                if checkbox.isChecked():
+                    selected_groups.append(group_name)
+            
+            # 获取显示模式
+            if self.urea_arithmetic_radio.isChecked():
+                value_type = 'arithmetic'
+            elif self.urea_weighted_radio.isChecked():
+                value_type = 'weighted'
+            else:
+                value_type = 'both'
+            
+            filters['urea_tracking'] = {
+                'enabled': True,
+                'selected_groups': selected_groups,
+                'filter_outliers': self.urea_filter_outliers.isChecked(),
+                'min_value': self.urea_min_value.value() if self.urea_filter_outliers.isChecked() else 5.0,
+                'max_value': self.urea_max_value.value() if self.urea_filter_outliers.isChecked() else 30.0,
+                'min_sample_size': self.urea_min_sample.value(),
+                'value_type': value_type
+            }
+        
         return filters
     
     def update_filter_progress(self, status, progress):
@@ -5014,6 +5870,12 @@ class MainWindow(QMainWindow):
             if stats:
                 print(f"统计信息: {stats}")  # 调试信息
                 self.update_analysis_panel(stats)
+                
+                # 处理尿素氮追踪结果
+                if 'urea_tracking' in stats:
+                    self.urea_tracking_results = stats['urea_tracking']
+                    # 在结果标签页中添加尿素氮追踪标签
+                    self.add_urea_tracking_tab()
             else:
                 print("没有收到统计信息")  # 调试信息
             

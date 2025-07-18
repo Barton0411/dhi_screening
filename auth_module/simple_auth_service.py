@@ -29,6 +29,7 @@ class SimpleAuthService:
         """初始化认证服务"""
         self.device_id = self._get_or_create_device_id()
         self.username = None
+        self.user_name = None  # 用户姓名
         self.last_heartbeat = None
         self.session_id = None
         
@@ -130,11 +131,15 @@ class SimpleAuthService:
             connection = self._get_db_connection()
             
             with connection.cursor() as cursor:
-                # 验证用户名密码
-                sql = "SELECT * FROM `id-pw` WHERE ID=%s AND PW=%s"
+                # 验证用户名密码并获取姓名
+                sql = "SELECT ID, PW, Name FROM `id-pw` WHERE ID=%s AND PW=%s"
                 cursor.execute(sql, (username, password))
-                if not cursor.fetchone():
+                user_info = cursor.fetchone()
+                if not user_info:
                     return False, "用户名或密码错误", None
+                
+                # 保存用户姓名
+                self.user_name = user_info[2] if user_info[2] else username
                 
                 # 使用现有的 user_sessions 表存储登录状态
                 
@@ -237,6 +242,10 @@ class SimpleAuthService:
         finally:
             if connection:
                 connection.close()
+    
+    def get_user_name(self) -> str:
+        """获取用户姓名"""
+        return self.user_name if self.user_name else self.username
     
     def logout(self):
         """登出"""

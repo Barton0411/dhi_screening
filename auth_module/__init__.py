@@ -1,5 +1,9 @@
 # 认证模块
-from .auth_service import AuthService
+try:
+    from .simple_auth_service import SimpleAuthService as AuthService
+except ImportError:
+    from .simple_auth_service_v2 import SimpleAuthService as AuthService
+
 from .login_dialog import LoginDialog, show_login_dialog
 from .register_dialog import RegisterDialog, show_register_dialog
 from .forgot_password_dialog import ForgotPasswordDialog

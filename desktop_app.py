@@ -9,6 +9,9 @@ import pandas as pd
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
 import logging
+import subprocess
+import atexit
+import requests
 
 # 设置logger
 logger = logging.getLogger(__name__)
@@ -30,6 +33,10 @@ import yaml
 # 导入我们的数据处理模块
 from data_processor import DataProcessor
 from models import FilterConfig
+
+# 导入认证模块
+from auth_module import LoginDialog, show_login_dialog
+from auth_module.simple_auth_service import SimpleAuthService
 
 
 class DisplaySettingsDialog(QDialog):
@@ -915,12 +922,15 @@ class FilterThread(QThread):
 class MainWindow(QMainWindow):
     """主窗口"""
     
-    def __init__(self):
+    def __init__(self, username=None, auth_service=None):
         super().__init__()
+        self.username = username or "未登录用户"
+        self.auth_service = auth_service
         self.data_list = []  # 存储所有处理过的数据
         self.processor = DataProcessor()
         self.data_processor = self.processor  # 为慢性乳房炎筛查功能提供别名
         self.current_results = pd.DataFrame()  # 当前筛选结果
+        self.heartbeat_timer = None  # 心跳定时器
         
         # 加载显示设置
         self.settings = QSettings("DHI", "ProteinScreening")
@@ -946,6 +956,10 @@ class MainWindow(QMainWindow):
         
         # 启动时检查是否有显示问题（防呆功能）
         QTimer.singleShot(1000, self.check_display_issues_on_startup)
+        
+        # 启动心跳机制
+        if self.auth_service:
+            self.start_heartbeat()
     
     def validate_and_fix_font_color(self, color_str: str) -> str:
         """防呆设计：验证并修正字体颜色，防止设置过浅的颜色导致文字不可见"""
@@ -1390,7 +1404,7 @@ class MainWindow(QMainWindow):
      
     def init_ui(self):
         """初始化界面"""
-        self.setWindowTitle("DHI数据分析与牛群健康监测系统 - 伊利液奶奶科院")
+        self.setWindowTitle("DHI筛查助手 - 伊利液奶奶科院")
         
         # 创建菜单栏 - 只创建一次
         self.create_menu_bar()
@@ -1563,9 +1577,39 @@ class MainWindow(QMainWindow):
         
         # 关于
         about_action = QAction("关于", self)
-        about_action.setStatusTip("关于DHI智能筛选大师")
+        about_action.setStatusTip("关于DHI筛查助手")
         about_action.triggered.connect(self.show_about)
         settings_menu.addAction(about_action)
+        
+        # 账号菜单
+        account_menu = menubar.addMenu("账号")
+        
+        # 当前用户显示
+        user_info_action = QAction(f"当前用户: {self.username}", self)
+        user_info_action.setEnabled(False)
+        account_menu.addAction(user_info_action)
+        
+        account_menu.addSeparator()
+        
+        # 修改密码
+        change_password_action = QAction("修改密码...", self)
+        change_password_action.setStatusTip("修改当前账号密码")
+        change_password_action.triggered.connect(self.show_change_password)
+        account_menu.addAction(change_password_action)
+        
+        # 邀请码管理
+        invite_code_action = QAction("邀请码管理...", self)
+        invite_code_action.setStatusTip("管理系统邀请码")
+        invite_code_action.triggered.connect(self.show_invite_code_management)
+        account_menu.addAction(invite_code_action)
+        
+        account_menu.addSeparator()
+        
+        # 退出登录
+        logout_action = QAction("退出登录", self)
+        logout_action.setStatusTip("退出当前账号")
+        logout_action.triggered.connect(self.logout)
+        account_menu.addAction(logout_action)
     
     def show_display_settings(self):
         """显示界面设置对话框"""
@@ -1607,10 +1651,10 @@ class MainWindow(QMainWindow):
     
     def show_about(self):
         """显示关于对话框"""
-        QMessageBox.about(self, "关于DHI筛查分析系统",
-                          "DHI筛查分析系统 v3.0\n\n"
+        QMessageBox.about(self, "关于DHI筛查助手",
+                          "DHI筛查助手 v3.0\n\n"
                          "伊利液奶奶科院\n"
-                         "用于处理DHI报告中的蛋白质筛选数据\n"
+                         "用于处理DHI报告数据的专业助手\n"
                          "支持批量文件处理和多种筛选条件\n"
                          "乳房炎筛查和监测分析功能\n\n"
                          "如有问题请联系技术支持")
@@ -1794,11 +1838,50 @@ class MainWindow(QMainWindow):
             # 静默失败，不影响程序启动
             print(f"显示问题检查失败: {e}")
     
+    def show_change_password(self):
+        """显示修改密码对话框"""
+        from auth_module.change_password_dialog import ChangePasswordDialog
+        dialog = ChangePasswordDialog(self, self.username)
+        dialog.exec()
+    
+    def show_invite_code_management(self):
+        """显示邀请码管理对话框"""
+        from auth_module.invite_code_dialog import InviteCodeDialog
+        dialog = InviteCodeDialog(self)
+        dialog.exec()
+    
+    def logout(self):
+        """退出登录"""
+        reply = QMessageBox.question(
+            self, 
+            "退出登录", 
+            "确定要退出当前账号吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            # 停止心跳
+            if self.heartbeat_timer:
+                self.heartbeat_timer.stop()
+            
+            # 调用认证服务的登出方法
+            if self.auth_service:
+                self.auth_service.logout()
+            
+            # 关闭主窗口
+            self.close()
+            
+            # 重启应用程序回到登录界面
+            import subprocess
+            subprocess.Popen([sys.executable] + sys.argv)
+            QApplication.quit()
+    
     def setup_status_bar(self):
         """设置状态栏"""
         status_bar = self.statusBar()
         if status_bar is not None:
-            status_bar.showMessage("伊利液奶奶科院 DHI筛查分析系统 - 准备就绪")
+            status_bar.showMessage("伊利液奶奶科院 DHI筛查助手 - 准备就绪")
             status_bar.setStyleSheet(f"""
                 QStatusBar {{
                     background-color: #e9ecef;
@@ -1849,6 +1932,47 @@ class MainWindow(QMainWindow):
         
         layout.addLayout(title_layout)
         layout.addStretch()
+        
+        # 用户信息区域
+        user_layout = QHBoxLayout()
+        user_layout.setSpacing(10)
+        
+        # 用户图标和名称
+        user_icon = QLabel("👤")
+        user_icon.setStyleSheet("background: transparent; color: white;")
+        user_layout.addWidget(user_icon)
+        
+        user_label = QLabel(f"当前用户: {self.username}")
+        user_label.setStyleSheet("""
+            color: white;
+            background: transparent;
+            font-weight: bold;
+        """)
+        user_layout.addWidget(user_label)
+        
+        # 注销按钮
+        logout_btn = QPushButton("注销")
+        logout_btn.setToolTip("退出登录")
+        logout_btn.clicked.connect(self.logout)
+        logout_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(255, 255, 255, 0.2);
+                border: 1px solid rgba(255, 255, 255, 0.3);
+                border-radius: 4px;
+                color: white;
+                padding: 5px 15px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: rgba(255, 255, 255, 0.3);
+            }
+            QPushButton:pressed {
+                background-color: rgba(255, 255, 255, 0.4);
+            }
+        """)
+        user_layout.addWidget(logout_btn)
+        
+        layout.addLayout(user_layout)
         
         # 快速设置按钮
         settings_btn = QPushButton("⚙️")
@@ -3425,7 +3549,7 @@ class MainWindow(QMainWindow):
         tab_padding_v = max(int(10 * dpi_ratio * 0.6), 8)
         tab_padding_h = max(int(14 * dpi_ratio * 0.6), 10)
         tab_border_radius = max(int(5 * dpi_ratio * 0.6), 4)
-        tab_min_width = max(int(120 * dpi_ratio * 0.6), 100)  # 增大最小宽度，确保中文标签名称完整显示
+        tab_min_width = max(int(200 * dpi_ratio * 0.6), 200)  # 增大最小宽度，确保中文标签名称完整显示
         
         self.tab_widget.setStyleSheet(f"""
             QTabWidget::pane {{
@@ -8786,6 +8910,79 @@ class MainWindow(QMainWindow):
                 self.analyze_monitoring_btn.setEnabled(False)
         else:
             self.analyze_monitoring_btn.setEnabled(False)
+    
+    def start_heartbeat(self):
+        """启动心跳机制"""
+        if self.heartbeat_timer:
+            self.heartbeat_timer.stop()
+        
+        self.heartbeat_timer = QTimer()
+        self.heartbeat_timer.timeout.connect(self.send_heartbeat)
+        self.heartbeat_timer.start(90000)  # 90秒
+        
+        # 立即发送一次心跳
+        self.send_heartbeat()
+    
+    def send_heartbeat(self):
+        """发送心跳"""
+        if self.auth_service:
+            success = self.auth_service.heartbeat()
+            if not success:
+                # 会话失效，需要重新登录
+                self.heartbeat_timer.stop()
+                QMessageBox.warning(
+                    self,
+                    "会话失效",
+                    "您的登录会话已失效，请重新登录。"
+                )
+                self.logout()
+    
+    def logout(self):
+        """注销"""
+        reply = QMessageBox.question(
+            self,
+            "确认注销",
+            "确定要退出登录吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            # 停止心跳
+            if self.heartbeat_timer:
+                self.heartbeat_timer.stop()
+            
+            # 调用注销接口
+            if self.auth_service:
+                self.auth_service.logout()
+            
+            # 关闭主窗口
+            self.close()
+            
+            # 重新显示登录对话框
+            login_dialog = LoginDialog(None, self.auth_service)
+            if login_dialog.exec() == QDialog.DialogCode.Accepted:
+                # 登录成功，创建新的主窗口
+                new_window = MainWindow(
+                    username=login_dialog.get_username(),
+                    auth_service=self.auth_service
+                )
+                new_window.showMaximized()
+            else:
+                # 用户取消登录，退出应用
+                QApplication.quit()
+    
+    def closeEvent(self, event):
+        """窗口关闭事件"""
+        # 停止心跳
+        if self.heartbeat_timer:
+            self.heartbeat_timer.stop()
+        
+        # 注销
+        if self.auth_service:
+            self.auth_service.logout()
+        
+        event.accept()
 
 
 class DHIDesktopApp:
@@ -8794,6 +8991,8 @@ class DHIDesktopApp:
     def __init__(self):
         self.app = None
         self.window = None
+        self.auth_service = None
+        self.username = None
     
     def run(self):
         """运行应用程序"""
@@ -8816,8 +9015,29 @@ class DHIDesktopApp:
             except:
                 pass
             
-            # 创建主窗口
-            self.window = MainWindow()
+            # 创建简化的认证服务（直接连接阿里云数据库）
+            print("正在连接认证服务...")
+            self.auth_service = SimpleAuthService()
+            
+            # 检查数据库连接
+            if not self.auth_service.check_server_health():
+                QMessageBox.critical(
+                    None,
+                    "数据库连接失败",
+                    "无法连接到数据库。\n请检查网络连接后重试。"
+                )
+                return 0
+            
+            # 显示登录对话框
+            login_dialog = LoginDialog(None, self.auth_service)
+            if login_dialog.exec() == QDialog.DialogCode.Accepted:
+                self.username = login_dialog.get_username()
+            else:
+                # 用户取消登录
+                return 0
+            
+            # 创建主窗口，传入用户名和认证服务
+            self.window = MainWindow(username=self.username, auth_service=self.auth_service)
             self.window.showMaximized()  # 自动最大化显示
             
             # 运行事件循环

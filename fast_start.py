@@ -6,8 +6,8 @@
 
 import sys
 import os
-from PyQt6.QtWidgets import QApplication, QLabel, QWidget, QVBoxLayout
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtWidgets import QApplication, QLabel, QWidget, QVBoxLayout, QProgressBar
+from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation
 from PyQt6.QtGui import QPixmap, QFont
 
 class SplashWindow(QWidget):
@@ -29,9 +29,10 @@ class SplashWindow(QWidget):
         background = QLabel()
         background.setStyleSheet("""
             QLabel {
-                background-color: #2c3e50;
+                background-color: white;
                 border-radius: 10px;
                 padding: 30px;
+                border: 1px solid #e0e0e0;
             }
         """)
         
@@ -48,7 +49,7 @@ class SplashWindow(QWidget):
         title_label = QLabel("DHI筛查助手")
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title_label.setStyleSheet("""
-            color: white;
+            color: #2c3e50;
             font-size: 24px;
             font-weight: bold;
             margin: 10px 0;
@@ -59,7 +60,7 @@ class SplashWindow(QWidget):
         version_label = QLabel("v4.02")
         version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         version_label.setStyleSheet("""
-            color: #bdc3c7;
+            color: #7f8c8d;
             font-size: 14px;
         """)
         main_layout.addWidget(version_label)
@@ -68,11 +69,30 @@ class SplashWindow(QWidget):
         self.loading_label = QLabel("正在启动...")
         self.loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.loading_label.setStyleSheet("""
-            color: #ecf0f1;
+            color: #34495e;
             font-size: 12px;
             margin-top: 20px;
         """)
         main_layout.addWidget(self.loading_label)
+        
+        # 添加进度条
+        self.progress = QProgressBar()
+        self.progress.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #ddd;
+                border-radius: 3px;
+                text-align: center;
+                height: 6px;
+                background-color: #f5f5f5;
+            }
+            QProgressBar::chunk {
+                background-color: #3498db;
+                border-radius: 2px;
+            }
+        """)
+        self.progress.setTextVisible(False)
+        self.progress.setRange(0, 0)  # 无限循环模式
+        main_layout.addWidget(self.progress)
         
         layout.addWidget(background)
         self.setLayout(layout)
@@ -109,21 +129,25 @@ def main():
         try:
             splash.update_loading_text("加载核心模块...")
             
-            # 导入主程序（这里会花费时间）
+            # 导入必要的模块
+            from auth_module import show_login_dialog
+            
+            splash.update_loading_text("准备登录...")
+            
+            # 关闭启动画面，显示登录窗口
+            splash.close()
+            
+            # 显示登录对话框
+            username = show_login_dialog()
+            if not username:
+                return 0  # 用户取消登录
+            
+            # 登录成功后，导入主程序
             from desktop_app import DHIDesktopApp
             
-            splash.update_loading_text("初始化应用程序...")
-            
-            # 创建主应用
+            # 创建并运行主应用
             main_app = DHIDesktopApp()
-            
-            splash.update_loading_text("准备就绪...")
-            
-            # 显示主窗口
             exit_code = main_app.run()
-            
-            # 关闭启动画面
-            splash.close()
             
             return exit_code
             

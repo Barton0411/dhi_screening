@@ -151,9 +151,32 @@ jobs:
         # 创建installer目录
         New-Item -ItemType Directory -Force -Path installer
         
-        # 使用.iss文件编译安装程序
-        Write-Host "🔨 编译安装程序..."
-        & $isccPath DHI_Screening_System_v4.01_Setup.iss
+        # 检查实际的输出目录
+        Write-Host "🔍 检查输出目录..."
+        $appDir = ""
+        if (Test-Path "dist\DHI筛查助手") {
+            $appDir = "DHI筛查助手"
+            Write-Host "✅ 找到输出目录: dist\$appDir"
+        } elseif (Test-Path "dist\DHI_Screening_System") {
+            $appDir = "DHI_Screening_System"
+            Write-Host "✅ 找到输出目录: dist\$appDir"
+        } else {
+            Write-Host "❌ 未找到预期的输出目录"
+            Get-ChildItem -Path dist | ForEach-Object { Write-Host "  - $_" }
+        }
+        
+        # 动态修改ISS文件中的路径
+        if ($appDir -ne "") {
+            Write-Host "📝 更新ISS文件中的路径..."
+            $issContent = Get-Content -Path "DHI_Screening_System_v4.01_Setup.iss" -Raw
+            $issContent = $issContent -replace 'Source: "dist\\[^"]*\\', "Source: `"dist\$appDir\"
+            $issContent | Out-File -FilePath "DHI_Screening_System_v4.01_Setup_temp.iss" -Encoding UTF8
+            
+            Write-Host "🔨 编译安装程序..."
+            & $isccPath "DHI_Screening_System_v4.01_Setup_temp.iss"
+        } else {
+            Write-Host "⚠️ 跳过安装程序创建"
+        }
         
         if ($LASTEXITCODE -eq 0) {
             Write-Host "✅ 安装程序创建成功！"

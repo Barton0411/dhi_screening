@@ -1,6 +1,7 @@
 import pandas as pd
 import zipfile
 import os
+import sys
 import re
 import yaml
 import tempfile
@@ -30,7 +31,19 @@ class DataProcessor:
         if temp_dir:
             self.temp_dir = temp_dir
         else:
-            self.temp_dir = str(self.config.get("upload", {}).get("temp_dir", "./temp"))
+            # 获取用户主目录下的应用数据目录
+            if sys.platform == "darwin":  # macOS
+                app_data_dir = os.path.expanduser("~/Library/Application Support/DHI筛查助手")
+            elif sys.platform == "win32":  # Windows
+                app_data_dir = os.path.expanduser("~/AppData/Local/DHI筛查助手")
+            else:  # Linux
+                app_data_dir = os.path.expanduser("~/.dhi_screening")
+            
+            # 创建应用数据目录
+            os.makedirs(app_data_dir, exist_ok=True)
+            
+            # 使用应用数据目录下的temp文件夹
+            self.temp_dir = os.path.join(app_data_dir, "temp")
         
         os.makedirs(self.temp_dir, exist_ok=True)
         

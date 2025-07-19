@@ -12,6 +12,7 @@ import logging
 import subprocess
 import atexit
 import requests
+import importlib.util
 
 # 设置logger
 logger = logging.getLogger(__name__)
@@ -46,10 +47,29 @@ from mastitis_monitoring import MastitisMonitoringCalculator
 from progress_manager import SmoothProgressDialog, AsyncProgressManager
 
 # 导入图表本地化
+ChinesePlotWidget = None
 try:
+    # 尝试直接导入
     from chart_localization import ChinesePlotWidget
-except ImportError:
-    ChinesePlotWidget = None
+    logger.info("成功导入 ChinesePlotWidget")
+except ImportError as e:
+    logger.warning(f"无法导入 ChinesePlotWidget: {e}")
+    # 尝试从当前目录导入
+    try:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        chart_path = os.path.join(base_dir, 'chart_localization.py')
+        if os.path.exists(chart_path):
+            spec = importlib.util.spec_from_file_location("chart_localization", chart_path)
+            chart_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(chart_module)
+            ChinesePlotWidget = chart_module.ChinesePlotWidget
+            logger.info(f"从文件路径导入 ChinesePlotWidget: {chart_path}")
+        else:
+            logger.warning(f"找不到 chart_localization.py: {chart_path}")
+    except Exception as e2:
+        logger.error(f"从文件导入 ChinesePlotWidget 失败: {e2}")
+except Exception as e:
+    logger.error(f"导入 ChinesePlotWidget 时出错: {e}")
 
 
 class DisplaySettingsDialog(QDialog):

@@ -65,25 +65,43 @@ jobs:
     
     - name: Build with PyInstaller
       run: |
-        pyinstaller --onedir `
-                    --windowed `
-                    --name="DHI筛查助手" `
-                    --version-file=version_info.txt `
-                    --icon=whg3r-qi1nv-001.ico `
-                    --add-data="config.yaml;." `
-                    --add-data="rules.yaml;." `
-                    --add-data="whg3r-qi1nv-001.ico;." `
-                    --add-data="README.md;." `
-                    --add-data="操作说明.md;." `
-                    --add-data="LICENSE.txt;." `
-                    --add-data="mastitis_monitoring.py;." `
-                    --add-data="data_processor.py;." `
-                    --add-data="models.py;." `
-                    --add-data="urea_tracker.py;." `
-                    --add-data="progress_manager.py;." `
-                    --add-data="chart_localization.py;." `
-                    --add-data="auth_module;auth_module" `
-                    desktop_app.py
+        Write-Host "🔨 开始构建Windows可执行文件 (OneDIR模式)..."
+        Write-Host "📋 使用spec文件构建"
+        Write-Host "🚀 OneDIR模式优势: 启动速度快，文件结构清晰"
+        
+        # 检查文件是否存在
+        if (Test-Path "DHI_Screening_System_Windows.spec") {
+            Write-Host "✅ 找到Windows专用spec文件"
+            pyinstaller DHI_Screening_System_Windows.spec
+        } else {
+            Write-Host "⚠️ 未找到Windows spec文件，使用命令行参数构建"
+            pyinstaller --onedir `
+                        --windowed `
+                        --name="DHI筛查助手" `
+                        --version-file=version_info.txt `
+                        --icon=whg3r-qi1nv-001.ico `
+                        --add-data="config.yaml;." `
+                        --add-data="rules.yaml;." `
+                        --add-data="whg3r-qi1nv-001.ico;." `
+                        --add-data="README.md;." `
+                        --add-data="操作说明.md;." `
+                        --add-data="LICENSE.txt;." `
+                        --add-data="mastitis_monitoring.py;." `
+                        --add-data="data_processor.py;." `
+                        --add-data="models.py;." `
+                        --add-data="urea_tracker.py;." `
+                        --add-data="progress_manager.py;." `
+                        --add-data="chart_localization.py;." `
+                        --add-data="auth_module;auth_module" `
+                        desktop_app.py
+        }
+        
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "✅ EXE构建成功！"
+        } else {
+            Write-Host "❌ EXE构建失败"
+            exit 1
+        }
     
     - name: Create installer with Inno Setup
       run: |

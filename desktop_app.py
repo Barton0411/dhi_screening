@@ -2002,41 +2002,41 @@ class MainWindow(QMainWindow):
         about_action.triggered.connect(self.show_about)
         settings_menu.addAction(about_action)
         
-        # 账号菜单
-        account_menu = menubar.addMenu("账号")
+        # 账号菜单 - 已移除，功能集成到其他位置
+        # account_menu = menubar.addMenu("账号")
         
-        # 当前用户显示
-        user_display = self.username
-        if self.auth_service and hasattr(self.auth_service, 'get_user_name'):
-            full_name = self.auth_service.get_user_name()
-            if full_name and full_name != self.username:
-                user_display = f"{self.username} ({full_name})"
+        # # 当前用户显示
+        # user_display = self.username
+        # if self.auth_service and hasattr(self.auth_service, 'get_user_name'):
+        #     full_name = self.auth_service.get_user_name()
+        #     if full_name and full_name != self.username:
+        #         user_display = f"{self.username} ({full_name})"
         
-        user_info_action = QAction(f"当前用户: {user_display}", self)
-        user_info_action.setEnabled(False)
-        account_menu.addAction(user_info_action)
+        # user_info_action = QAction(f"当前用户: {user_display}", self)
+        # user_info_action.setEnabled(False)
+        # account_menu.addAction(user_info_action)
         
-        account_menu.addSeparator()
+        # account_menu.addSeparator()
         
-        # 修改密码
-        change_password_action = QAction("修改密码...", self)
-        change_password_action.setStatusTip("修改当前账号密码")
-        change_password_action.triggered.connect(self.show_change_password)
-        account_menu.addAction(change_password_action)
+        # # 修改密码
+        # change_password_action = QAction("修改密码...", self)
+        # change_password_action.setStatusTip("修改当前账号密码")
+        # change_password_action.triggered.connect(self.show_change_password)
+        # account_menu.addAction(change_password_action)
         
-        # 邀请码管理
-        invite_code_action = QAction("邀请码管理...", self)
-        invite_code_action.setStatusTip("管理系统邀请码")
-        invite_code_action.triggered.connect(self.show_invite_code_management)
-        account_menu.addAction(invite_code_action)
+        # # 邀请码管理
+        # invite_code_action = QAction("邀请码管理...", self)
+        # invite_code_action.setStatusTip("管理系统邀请码")
+        # invite_code_action.triggered.connect(self.show_invite_code_management)
+        # account_menu.addAction(invite_code_action)
         
-        account_menu.addSeparator()
+        # account_menu.addSeparator()
         
-        # 退出登录
-        logout_action = QAction("退出登录", self)
-        logout_action.setStatusTip("退出当前账号")
-        logout_action.triggered.connect(self.logout)
-        account_menu.addAction(logout_action)
+        # # 退出登录
+        # logout_action = QAction("退出登录", self)
+        # logout_action.setStatusTip("退出当前账号")
+        # logout_action.triggered.connect(self.logout)
+        # account_menu.addAction(logout_action)
     
     def show_display_settings(self):
         """显示界面设置对话框"""

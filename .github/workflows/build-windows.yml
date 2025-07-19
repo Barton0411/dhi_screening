@@ -98,6 +98,8 @@ jobs:
         
         if ($LASTEXITCODE -eq 0) {
             Write-Host "✅ EXE构建成功！"
+            Write-Host "📂 查看dist目录内容："
+            Get-ChildItem -Path dist -Recurse -Depth 1 | Format-Table FullName
         } else {
             Write-Host "❌ EXE构建失败"
             exit 1

@@ -16,6 +16,7 @@ a = Analysis(
         ('config.yaml', '.'),
         ('rules.yaml', '.'), 
         ('whg3r-qi1nv-001.ico', '.'),
+        ('whg3r-qi1nv-001.icns', '.'),
         ('README.md', '.'),
         ('操作说明.md', '.'),
         ('LICENSE.txt', '.'),
@@ -169,7 +170,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='whg3r-qi1nv-001.ico'  # 使用ico文件，PyInstaller会自动处理
+    icon='whg3r-qi1nv-001.icns'  # 使用macOS原生icns格式
 )
 
 # 文件收集配置 (onedir模式)
@@ -188,7 +189,7 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name=f'{APP_NAME}.app',
-    icon='whg3r-qi1nv-001.ico',  # PyInstaller会自动转换为icns
+    icon='whg3r-qi1nv-001.icns',  # 使用macOS原生icns格式
     bundle_identifier='com.yili.dhi.screening',
     version=APP_VERSION,
     info_plist={

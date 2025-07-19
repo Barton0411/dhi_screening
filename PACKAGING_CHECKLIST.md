@@ -24,7 +24,7 @@
 ### 准备工作
 - [x] 创建 DHI_Screening_System_macOS.spec 配置文件
 - [x] 创建 build_macos.sh 打包脚本
-- [ ] 图标文件 whg3r-qi1nv-001.ico（需要转换为icns）
+- [x] 图标文件 whg3r-qi1nv-001.icns（已准备好）
 - [ ] 开发者证书准备（Developer ID Application: 王波臻）
 - [ ] Team ID 获取
 

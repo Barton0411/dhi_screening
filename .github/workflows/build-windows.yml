@@ -215,24 +215,40 @@ jobs:
         name: DHI筛查助手-Windows-Installer-v${{ steps.version.outputs.version }}
         path: installer/*.exe
     
-    - name: Create Release
-      if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v2
-      with:
-        files: |
-          installer/*.exe
-        body: |
-          ## DHI筛查助手 v${{ steps.version.outputs.version }}
-          
-          ### Windows安装包
-          - 支持Windows 10/11
-          - 包含所有必要的运行时组件
-          - 无需额外安装Python环境
-          
-          ### 安装说明
-          1. 下载安装包
-          2. 双击运行安装程序
-          3. 按照提示完成安装
-          4. 从开始菜单或桌面快捷方式启动程序
-        draft: false
-        prerelease: false
+    # Release creation removed due to permission issues
+    # Artifacts can be downloaded from Actions page
+    
+    - name: Build Summary
+      if: always()
+      run: |
+        Write-Host "========================================"
+        Write-Host "🎉 DHI筛查助手 Windows 构建总结"
+        Write-Host "========================================"
+        Write-Host "版本: v${{ steps.version.outputs.version }}"
+        Write-Host ""
+        
+        if (Test-Path "dist\DHI_Screening_System") {
+            Write-Host "✅ EXE构建: 成功"
+            $exeSize = (Get-ChildItem "dist\DHI_Screening_System" -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB
+            Write-Host "   程序大小: $([Math]::Round($exeSize, 2)) MB"
+        } else {
+            Write-Host "❌ EXE构建: 失败"
+        }
+        
+        if (Test-Path "installer\*.exe") {
+            Write-Host "✅ 安装程序: 成功"
+            Get-ChildItem "installer\*.exe" | ForEach-Object {
+                $installerSize = $_.Length / 1MB
+                Write-Host "   $($_.Name): $([Math]::Round($installerSize, 2)) MB"
+            }
+        } else {
+            Write-Host "⚠️ 安装程序: 未创建"
+        }
+        
+        Write-Host ""
+        Write-Host "📥 下载方式:"
+        Write-Host "1. 访问 Actions 页面"
+        Write-Host "2. 点击此次构建"
+        Write-Host "3. 在页面底部下载 Artifacts"
+        Write-Host ""
+        Write-Host "构建完成！"

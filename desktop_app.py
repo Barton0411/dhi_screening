@@ -3503,6 +3503,33 @@ class MainWindow(QMainWindow):
 
     def load_filter_config(self, filter_key):
         """从配置文件加载筛选项目配置"""
+        # 定义英文到中文的映射
+        name_mapping = {
+            'fat_pct': '乳脂率(%)',
+            'fat_protein_ratio': '脂蛋比',
+            'somatic_cell_count': '体细胞数(万/ml)',
+            'somatic_cell_score': '体细胞分',
+            'urea_nitrogen': '尿素氮(mg/dl)',
+            'lactose_pct': '乳糖率',
+            'milk_loss': '奶损失(Kg)',
+            'milk_payment_diff': '奶款差',
+            'economic_loss': '经济损失',
+            'corrected_milk': '校正奶(Kg)',
+            'persistency': '持续力',
+            'whi': 'WHI',
+            'fore_milk_yield': '前奶量(Kg)',
+            'fore_somatic_cell_count': '前体细胞(万/ml)',
+            'fore_somatic_cell_score': '前体细胞分',
+            'fore_milk_loss': '前奶损失(Kg)',
+            'peak_milk_yield': '高峰奶(Kg)',
+            'peak_days': '高峰日(天)',
+            'milk_305': '305奶量(Kg)',
+            'total_milk_yield': '总奶量(Kg)',
+            'total_fat_pct': '总乳脂(%)',
+            'total_protein_pct': '总蛋白(%)',
+            'mature_equivalent': '成年当量(Kg)'
+        }
+        
         try:
             import yaml
             with open('rules.yaml', 'r', encoding='utf-8') as f:
@@ -3510,11 +3537,15 @@ class MainWindow(QMainWindow):
                 
             optional_filters = config.get('optional_filters', {})
             if filter_key in optional_filters:
-                return optional_filters[filter_key]
+                filter_config = optional_filters[filter_key]
+                # 如果配置中没有中文名称，使用映射表
+                if 'chinese_name' not in filter_config:
+                    filter_config['chinese_name'] = name_mapping.get(filter_key, filter_key)
+                return filter_config
             else:
-                # 返回默认配置
+                # 返回默认配置，使用映射表中的中文名称
                 return {
-                    'chinese_name': filter_key,
+                    'chinese_name': name_mapping.get(filter_key, filter_key),
                     'min': 0.0,
                     'max': 100.0,
                     'min_match_months': 3,
@@ -3522,8 +3553,9 @@ class MainWindow(QMainWindow):
                 }
         except Exception as e:
             print(f"加载筛选配置失败: {e}")
+            # 出错时返回默认配置，使用映射表中的中文名称
             return {
-                'chinese_name': filter_key,
+                'chinese_name': name_mapping.get(filter_key, filter_key),
                 'min': 0.0,
                 'max': 100.0,
                 'min_match_months': 3,

@@ -118,14 +118,27 @@ class SplashWindow(QWidget):
 
 def main():
     """快速启动主函数"""
+    # 如果不需要启动画面，直接运行主程序
+    NO_SPLASH = os.environ.get('NO_SPLASH', 'false').lower() == 'true'
+    
+    if NO_SPLASH:
+        # 直接运行主程序，无启动画面
+        from desktop_app import DHIDesktopApp
+        app = DHIDesktopApp()
+        sys.exit(app.run())
+    
     # 1. 创建应用程序和启动画面（很快）
     app = QApplication(sys.argv)
     splash = SplashWindow()
     splash.show()
     QApplication.processEvents()
     
+    # 保存主窗口引用
+    main_window = None
+    
     # 2. 延迟导入并启动主程序
     def load_and_start():
+        nonlocal main_window
         try:
             splash.update_loading_text("加载核心模块...")
             
@@ -163,7 +176,8 @@ def main():
                     "数据库连接失败",
                     "无法连接到数据库。\n请检查网络连接后重试。"
                 )
-                sys.exit(0)
+                app.quit()
+                return
             
             # 移除启动画面的置顶属性，让登录窗口能显示在前面
             splash.setWindowFlags(splash.windowFlags() & ~Qt.WindowType.WindowStaysOnTopHint)
@@ -183,28 +197,27 @@ def main():
                 splash.close()
                 
                 # 创建主窗口
-                window = MainWindow(username=username, auth_service=auth_service)
-                window.showMaximized()
+                main_window = MainWindow(username=username, auth_service=auth_service)
+                main_window.showMaximized()
                 
-                # 运行事件循环
-                sys.exit(app.exec())
+                # 主窗口创建成功，继续运行事件循环
             else:
                 # 用户取消登录
                 splash.close()
-                sys.exit(0)
+                app.quit()
             
         except Exception as e:
             splash.close()
             from PyQt6.QtWidgets import QMessageBox
             QMessageBox.critical(None, "启动错误", f"程序启动失败：\n{str(e)}")
-            sys.exit(1)
+            app.quit()
     
     # 3. 使用定时器延迟加载（让启动画面先显示）
     QTimer.singleShot(500, load_and_start)  # 延迟500ms，确保启动画面显示
     
     # 4. 运行事件循环
-    app.exec()
+    return app.exec()
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

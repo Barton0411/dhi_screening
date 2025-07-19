@@ -7,7 +7,7 @@
 #define MyAppVersion "4.01"
 #define MyAppPublisher "Yili Liquid Milk Research Institute"
 #define MyAppURL "https://github.com/Barton0411/dhi_screening"
-#define MyAppExeName "DHI_Screening_System_v4.01.exe"
+#define MyAppExeName "DHI筛查助手.exe"
 #define MyAppDescription "DHI Data Analysis and Cattle Health Monitoring System"
 
 [Setup]
@@ -55,11 +55,10 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 ; Main Program Folder (onedir mode complete folder)
-Source: "dist\DHI_Screening_System_v3.0\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "dist\DHI筛查助手\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Documentation
 Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "DHI_精准筛查助手-操作说明.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist; DestName: "Operation_Manual.md"
-Source: "需求说明.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist; DestName: "Requirements.md"
+Source: "操作说明.md"; DestDir: "{app}"; Flags: ignoreversion; DestName: "Operation_Manual.md"
 ; Configuration Files
 Source: "config.yaml"; DestDir: "{app}"; Flags: ignoreversion
 Source: "rules.yaml"; DestDir: "{app}"; Flags: ignoreversion

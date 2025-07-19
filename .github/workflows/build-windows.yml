@@ -1,0 +1,129 @@
+name: Build Windows Package
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Get version
+      id: version
+      shell: bash
+      run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+    
+    - name: Create version info file
+      run: |
+        @"
+        VSVersionInfo(
+          ffi=FixedFileInfo(
+            filevers=(4, 0, 2, 0),
+            prodvers=(4, 0, 2, 0),
+            mask=0x3f,
+            flags=0x0,
+            OS=0x40004,
+            fileType=0x1,
+            subtype=0x0,
+            date=(0, 0)
+          ),
+          kids=[
+            StringFileInfo(
+              [
+              StringTable(
+                u'040904B0',
+                [StringStruct(u'CompanyName', u'伊利液奶奶科院'),
+                StringStruct(u'FileDescription', u'DHI数据分析与乳房炎监测系统'),
+                StringStruct(u'FileVersion', u'4.0.2.0'),
+                StringStruct(u'InternalName', u'DHI筛查助手'),
+                StringStruct(u'LegalCopyright', u'Copyright (C) 2025 伊利液奶奶科院'),
+                StringStruct(u'OriginalFilename', u'DHI筛查助手.exe'),
+                StringStruct(u'ProductName', u'DHI筛查助手'),
+                StringStruct(u'ProductVersion', u'4.0.2.0')])
+              ]), 
+            VarFileInfo([VarStruct(u'Translation', [1033, 1200])])
+          ]
+        )
+        "@ | Out-File -FilePath version_info.txt -Encoding UTF8
+    
+    - name: Build with PyInstaller
+      run: |
+        pyinstaller --onedir `
+                    --windowed `
+                    --name="DHI筛查助手" `
+                    --version-file=version_info.txt `
+                    --icon=whg3r-qi1nv-001.ico `
+                    --add-data="config.yaml;." `
+                    --add-data="rules.yaml;." `
+                    --add-data="whg3r-qi1nv-001.ico;." `
+                    --add-data="README.md;." `
+                    --add-data="操作说明.md;." `
+                    --add-data="LICENSE.txt;." `
+                    --add-data="mastitis_monitoring.py;." `
+                    --add-data="data_processor.py;." `
+                    --add-data="models.py;." `
+                    --add-data="urea_tracker.py;." `
+                    --add-data="progress_manager.py;." `
+                    --add-data="chart_localization.py;." `
+                    --add-data="auth_module;auth_module" `
+                    desktop_app.py
+    
+    - name: Create installer with Inno Setup
+      run: |
+        # 下载并安装Inno Setup
+        curl -L -o innosetup.exe https://files.jrsoftware.org/is/6/innosetup-6.2.2.exe
+        .\innosetup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR="C:\InnoSetup"
+        
+        # 使用已有的.iss文件编译安装程序
+        & "C:\InnoSetup\ISCC.exe" DHI_Screening_System_v4.01_Setup.iss
+    
+    - name: Upload Windows executable
+      uses: actions/upload-artifact@v3
+      with:
+        name: DHI筛查助手-Windows-v${{ steps.version.outputs.version }}
+        path: dist/DHI筛查助手/
+    
+    - name: Upload Windows installer
+      uses: actions/upload-artifact@v3
+      with:
+        name: DHI筛查助手-Windows-Installer-v${{ steps.version.outputs.version }}
+        path: installer/*.exe
+    
+    - name: Create Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          installer/*.exe
+        body: |
+          ## DHI筛查助手 v${{ steps.version.outputs.version }}
+          
+          ### Windows安装包
+          - 支持Windows 10/11
+          - 包含所有必要的运行时组件
+          - 无需额外安装Python环境
+          
+          ### 安装说明
+          1. 下载安装包
+          2. 双击运行安装程序
+          3. 按照提示完成安装
+          4. 从开始菜单或桌面快捷方式启动程序
+        draft: false
+        prerelease: false

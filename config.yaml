@@ -1,7 +1,7 @@
 app:
-  name: "奶牛蛋白筛查系统"
-  version: "1.0.0"
-  debug: true
+  name: "DHI筛查助手"
+  version: "4.02"
+  debug: false
 
 upload:
   max_file_size: 104857600  # 100MB in bytes

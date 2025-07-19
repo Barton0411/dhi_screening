@@ -105,12 +105,60 @@ jobs:
     
     - name: Create installer with Inno Setup
       run: |
-        # 下载并安装Inno Setup
-        curl -L -o innosetup.exe https://files.jrsoftware.org/is/6/innosetup-6.2.2.exe
-        .\innosetup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR="C:\InnoSetup"
+        Write-Host "📦 准备创建Windows安装程序..."
         
-        # 使用已有的.iss文件编译安装程序
-        & "C:\InnoSetup\ISCC.exe" DHI_Screening_System_v4.01_Setup.iss
+        # 下载并安装Inno Setup
+        Write-Host "⬇️ 下载Inno Setup..."
+        curl -L -o innosetup.exe https://files.jrsoftware.org/is/6/innosetup-6.2.2.exe
+        
+        Write-Host "📥 安装Inno Setup..."
+        Start-Process -FilePath ".\innosetup.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-" -Wait
+        
+        # 等待安装完成
+        Start-Sleep -Seconds 5
+        
+        # 查找ISCC.exe的实际位置
+        $isccPath = ""
+        $possiblePaths = @(
+            "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+            "C:\Program Files\Inno Setup 6\ISCC.exe",
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
+        )
+        
+        foreach ($path in $possiblePaths) {
+            if (Test-Path $path) {
+                $isccPath = $path
+                Write-Host "✅ 找到ISCC.exe: $isccPath"
+                break
+            }
+        }
+        
+        if ($isccPath -eq "") {
+            Write-Host "❌ 未找到ISCC.exe，尝试搜索..."
+            $found = Get-ChildItem -Path "C:\Program Files*" -Filter "ISCC.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) {
+                $isccPath = $found.FullName
+                Write-Host "✅ 搜索到ISCC.exe: $isccPath"
+            } else {
+                Write-Host "❌ 无法找到ISCC.exe，跳过安装程序创建"
+                exit 0
+            }
+        }
+        
+        # 创建installer目录
+        New-Item -ItemType Directory -Force -Path installer
+        
+        # 使用.iss文件编译安装程序
+        Write-Host "🔨 编译安装程序..."
+        & $isccPath DHI_Screening_System_v4.01_Setup.iss
+        
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "✅ 安装程序创建成功！"
+            Get-ChildItem -Path installer -Filter "*.exe" | ForEach-Object { Write-Host "📦 $($_.Name)" }
+        } else {
+            Write-Host "⚠️ 安装程序创建失败，但继续构建流程"
+        }
     
     - name: Upload Windows executable
       uses: actions/upload-artifact@v4

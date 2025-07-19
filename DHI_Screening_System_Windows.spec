@@ -136,9 +136,7 @@ a = Analysis(
         'encodings.ascii',
         'locale',
         
-        # Windows特定
-        'win32com',
-        'win32com.client',
+        # 其他
         'importlib.util'
     ],
     hookspath=[],

@@ -124,44 +124,86 @@ def main():
     splash.show()
     QApplication.processEvents()
     
-    # 2. 延迟导入重模块
-    def load_main_app():
+    # 2. 延迟导入并启动主程序
+    def load_and_start():
         try:
             splash.update_loading_text("加载核心模块...")
             
-            # 导入必要的模块
-            from auth_module import show_login_dialog
+            # 导入主程序需要的模块
+            from desktop_app import SimpleAuthService, LoginDialog, MainWindow
+            from PyQt6.QtWidgets import QDialog, QMessageBox
+            from PyQt6.QtGui import QIcon
             
-            splash.update_loading_text("准备登录...")
+            splash.update_loading_text("初始化程序...")
             
-            # 关闭启动画面，显示登录窗口
-            splash.close()
+            # 设置应用程序信息（从DHIDesktopApp.run()复制）
+            app.setApplicationName("DHI智能筛选大师")
+            app.setApplicationVersion("2.0.0")
+            app.setOrganizationName("DHI")
+            app.setOrganizationDomain("dhi.com")
+            app.setStyle('Fusion')
+            
+            # 设置应用程序图标
+            try:
+                if os.path.exists("whg3r-qi1nv-001.ico"):
+                    app.setWindowIcon(QIcon("whg3r-qi1nv-001.ico"))
+            except:
+                pass
+            
+            splash.update_loading_text("连接认证服务...")
+            
+            # 创建认证服务
+            auth_service = SimpleAuthService()
+            
+            # 检查数据库连接
+            if not auth_service.check_server_health():
+                splash.close()
+                QMessageBox.critical(
+                    None,
+                    "数据库连接失败",
+                    "无法连接到数据库。\n请检查网络连接后重试。"
+                )
+                sys.exit(0)
+            
+            # 移除启动画面的置顶属性，让登录窗口能显示在前面
+            splash.setWindowFlags(splash.windowFlags() & ~Qt.WindowType.WindowStaysOnTopHint)
+            splash.lower()
+            splash.update_loading_text("请登录...")
             
             # 显示登录对话框
-            username = show_login_dialog()
-            if not username:
-                return 0  # 用户取消登录
+            login_dialog = LoginDialog(None, auth_service)
+            login_dialog.setWindowFlags(login_dialog.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+            login_dialog.raise_()
+            login_dialog.activateWindow()
             
-            # 登录成功后，导入主程序
-            from desktop_app import DHIDesktopApp
-            
-            # 创建并运行主应用
-            main_app = DHIDesktopApp()
-            exit_code = main_app.run()
-            
-            return exit_code
+            if login_dialog.exec() == QDialog.DialogCode.Accepted:
+                username = login_dialog.get_username()
+                
+                # 登录成功，关闭启动画面
+                splash.close()
+                
+                # 创建主窗口
+                window = MainWindow(username=username, auth_service=auth_service)
+                window.showMaximized()
+                
+                # 运行事件循环
+                sys.exit(app.exec())
+            else:
+                # 用户取消登录
+                splash.close()
+                sys.exit(0)
             
         except Exception as e:
             splash.close()
             from PyQt6.QtWidgets import QMessageBox
             QMessageBox.critical(None, "启动错误", f"程序启动失败：\n{str(e)}")
-            return 1
+            sys.exit(1)
     
     # 3. 使用定时器延迟加载（让启动画面先显示）
-    QTimer.singleShot(100, lambda: sys.exit(load_main_app()))
+    QTimer.singleShot(500, load_and_start)  # 延迟500ms，确保启动画面显示
     
     # 4. 运行事件循环
-    sys.exit(app.exec())
+    app.exec()
 
 
 if __name__ == "__main__":

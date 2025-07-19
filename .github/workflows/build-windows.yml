@@ -153,23 +153,41 @@ jobs:
         
         # 检查实际的输出目录
         Write-Host "🔍 检查输出目录..."
-        $appDir = ""
+        $sourceDir = ""
+        $targetDir = "dist\DHI_Screening_System"
+        
         if (Test-Path "dist\DHI筛查助手") {
-            $appDir = "DHI筛查助手"
-            Write-Host "✅ 找到输出目录: dist\$appDir"
+            $sourceDir = "dist\DHI筛查助手"
+            Write-Host "✅ 找到中文输出目录: $sourceDir"
+            
+            # 复制到英文路径以避免编码问题
+            Write-Host "📁 复制到英文路径..."
+            if (Test-Path $targetDir) {
+                Remove-Item -Path $targetDir -Recurse -Force
+            }
+            Copy-Item -Path $sourceDir -Destination $targetDir -Recurse -Force
+            Write-Host "✅ 已复制到: $targetDir"
+            
+            # 重命名exe文件为英文
+            $chineseExe = "$targetDir\DHI筛查助手.exe"
+            $englishExe = "$targetDir\DHI_Screening_System.exe"
+            if (Test-Path $chineseExe) {
+                Rename-Item -Path $chineseExe -NewName "DHI_Screening_System.exe" -Force
+                Write-Host "✅ 已重命名exe文件"
+            }
+            
         } elseif (Test-Path "dist\DHI_Screening_System") {
-            $appDir = "DHI_Screening_System"
-            Write-Host "✅ 找到输出目录: dist\$appDir"
+            Write-Host "✅ 已有英文输出目录"
         } else {
             Write-Host "❌ 未找到预期的输出目录"
             Get-ChildItem -Path dist | ForEach-Object { Write-Host "  - $_" }
         }
         
-        # 动态修改ISS文件中的路径
-        if ($appDir -ne "") {
+        # 使用固定的英文路径创建安装程序
+        if (Test-Path $targetDir) {
             Write-Host "📝 更新ISS文件中的路径..."
             $issContent = Get-Content -Path "DHI_Screening_System_v4.01_Setup.iss" -Raw
-            $issContent = $issContent -replace 'Source: "dist\\[^"]*\\', "Source: `"dist\$appDir\"
+            $issContent = $issContent -replace 'Source: "dist\\[^"]*\\', 'Source: "dist\DHI_Screening_System\'
             $issContent | Out-File -FilePath "DHI_Screening_System_v4.01_Setup_temp.iss" -Encoding UTF8
             
             Write-Host "🔨 编译安装程序..."

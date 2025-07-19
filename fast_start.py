@@ -167,7 +167,7 @@ def main():
             splash.update_loading_text("初始化程序...")
             
             # 设置应用程序信息（从DHIDesktopApp.run()复制）
-            app.setApplicationName("DHI智能筛选大师")
+            app.setApplicationName("DHI筛查助手")
             app.setApplicationVersion("2.0.0")
             app.setOrganizationName("DHI")
             app.setOrganizationDomain("dhi.com")
@@ -208,11 +208,10 @@ def main():
             # 创建登录对话框
             login_dialog = LoginDialog(None, auth_service)
             
-            # 设置登录窗口为模态对话框，并确保在最前面
+            # 设置登录窗口为模态对话框
             login_dialog.setModal(True)
             login_dialog.setWindowFlags(
                 Qt.WindowType.Dialog | 
-                Qt.WindowType.WindowStaysOnTopHint |
                 Qt.WindowType.WindowCloseButtonHint |
                 Qt.WindowType.WindowTitleHint
             )
@@ -222,14 +221,8 @@ def main():
             login_dialog.raise_()
             login_dialog.activateWindow()
             
-            # 持续确保登录窗口在前面
-            def keep_dialog_on_top():
-                if login_dialog.isVisible():
-                    login_dialog.raise_()
-                    login_dialog.activateWindow()
-                    QTimer.singleShot(100, keep_dialog_on_top)
-            
-            keep_dialog_on_top()
+            # 只在初始显示后短暂确保窗口在前面（避免干扰注册等子窗口）
+            QTimer.singleShot(200, lambda: login_dialog.raise_())
             
             if login_dialog.exec() == QDialog.DialogCode.Accepted:
                 username = login_dialog.get_username()

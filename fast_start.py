@@ -21,6 +21,14 @@ class SplashWindow(QWidget):
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
+        # 设置窗口图标
+        try:
+            from PyQt6.QtGui import QIcon
+            if os.path.exists("whg3r-qi1nv-001.ico"):
+                self.setWindowIcon(QIcon("whg3r-qi1nv-001.ico"))
+        except:
+            pass
+        
         # 布局
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
@@ -129,6 +137,15 @@ def main():
     
     # 1. 创建应用程序和启动画面（很快）
     app = QApplication(sys.argv)
+    
+    # 设置应用程序图标
+    try:
+        from PyQt6.QtGui import QIcon
+        if os.path.exists("whg3r-qi1nv-001.ico"):
+            app.setWindowIcon(QIcon("whg3r-qi1nv-001.ico"))
+    except:
+        pass
+    
     splash = SplashWindow()
     splash.show()
     QApplication.processEvents()
@@ -179,16 +196,40 @@ def main():
                 app.quit()
                 return
             
-            # 移除启动画面的置顶属性，让登录窗口能显示在前面
-            splash.setWindowFlags(splash.windowFlags() & ~Qt.WindowType.WindowStaysOnTopHint)
-            splash.lower()
+            # 更新启动画面文本
             splash.update_loading_text("请登录...")
             
-            # 显示登录对话框
+            # 强制启动画面到后台
+            splash.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool)
+            splash.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+            splash.show()  # 重新显示以应用新的窗口标志
+            splash.lower()
+            
+            # 创建登录对话框
             login_dialog = LoginDialog(None, auth_service)
-            login_dialog.setWindowFlags(login_dialog.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+            
+            # 设置登录窗口为模态对话框，并确保在最前面
+            login_dialog.setModal(True)
+            login_dialog.setWindowFlags(
+                Qt.WindowType.Dialog | 
+                Qt.WindowType.WindowStaysOnTopHint |
+                Qt.WindowType.WindowCloseButtonHint |
+                Qt.WindowType.WindowTitleHint
+            )
+            
+            # 显示并激活登录窗口
+            login_dialog.show()
             login_dialog.raise_()
             login_dialog.activateWindow()
+            
+            # 持续确保登录窗口在前面
+            def keep_dialog_on_top():
+                if login_dialog.isVisible():
+                    login_dialog.raise_()
+                    login_dialog.activateWindow()
+                    QTimer.singleShot(100, keep_dialog_on_top)
+            
+            keep_dialog_on_top()
             
             if login_dialog.exec() == QDialog.DialogCode.Accepted:
                 username = login_dialog.get_username()

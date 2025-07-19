@@ -58,17 +58,18 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "dist\DHI_Screening_System\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Documentation
 Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "操作说明.md"; DestDir: "{app}"; Flags: ignoreversion; DestName: "Operation_Manual.md"
-; Configuration Files
-Source: "config.yaml"; DestDir: "{app}"; Flags: ignoreversion
-Source: "rules.yaml"; DestDir: "{app}"; Flags: ignoreversion
-; Icon File
-Source: "whg3r-qi1nv-001.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "操作说明.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist; DestName: "Operation_Manual.md"
+Source: "LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+; Configuration Files (already included in dist folder)
+; Source: "config.yaml"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+; Source: "rules.yaml"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+; Icon File (already included in dist folder)
+; Source: "whg3r-qi1nv-001.ico"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]
 ; Start Menu Program Group
 Name: "{group}\{#MyAppNameChinese}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\whg3r-qi1nv-001.ico"
-Name: "{group}\Operation Manual"; Filename: "{app}\Operation_Manual.md"
+Name: "{group}\使用说明"; Filename: "{app}\Operation_Manual.md"; Flags: createonlyiffileexists
 Name: "{group}\Uninstall {#MyAppNameChinese}"; Filename: "{uninstallexe}"
 
 ; Desktop Shortcut

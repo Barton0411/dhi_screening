@@ -1,0 +1,122 @@
+name: Build macOS Package
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.9'
+
+    - name: Get version
+      id: version
+      run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+        brew install create-dmg
+
+    - name: Build with PyInstaller
+      run: |
+        echo "🔨 开始构建macOS应用程序..."
+
+        if [ -f "DHI_Screening_System_macOS.spec" ]; then
+            echo "✅ 找到macOS专用spec文件"
+            pyinstaller DHI_Screening_System_macOS.spec
+        else
+            echo "❌ 未找到macOS spec文件"
+            exit 1
+        fi
+
+        if [ -d "dist/DHI筛查助手.app" ]; then
+            echo "✅ 应用程序构建成功！"
+            ls -la dist/
+        else
+            echo "❌ 应用程序构建失败"
+            exit 1
+        fi
+
+    - name: Create DMG
+      run: |
+        echo "📦 创建DMG安装包..."
+
+        # 创建临时目录用于DMG
+        mkdir -p dmg_temp
+        cp -R "dist/DHI筛查助手.app" dmg_temp/
+
+        # 创建DMG
+        create-dmg \
+          --volname "DHI筛查助手 ${{ steps.version.outputs.version }}" \
+          --window-pos 200 120 \
+          --window-size 600 400 \
+          --icon-size 100 \
+          --icon "DHI筛查助手.app" 175 190 \
+          --hide-extension "DHI筛查助手.app" \
+          --app-drop-link 425 190 \
+          "DHI筛查助手-${{ steps.version.outputs.version }}.dmg" \
+          dmg_temp/
+
+        if [ -f "DHI筛查助手-${{ steps.version.outputs.version }}.dmg" ]; then
+            echo "✅ DMG创建成功！"
+            ls -lh *.dmg
+        else
+            echo "⚠️ DMG创建失败，尝试简单方式..."
+            hdiutil create -volname "DHI筛查助手" -srcfolder dmg_temp -ov -format UDZO "DHI筛查助手-${{ steps.version.outputs.version }}.dmg"
+        fi
+
+    - name: Upload macOS App
+      uses: actions/upload-artifact@v4
+      with:
+        name: DHI筛查助手-macOS-v${{ steps.version.outputs.version }}
+        path: dist/DHI筛查助手.app
+
+    - name: Upload macOS DMG
+      uses: actions/upload-artifact@v4
+      with:
+        name: DHI筛查助手-macOS-DMG-v${{ steps.version.outputs.version }}
+        path: "*.dmg"
+
+    - name: Build Summary
+      if: always()
+      run: |
+        echo "========================================"
+        echo "🎉 DHI筛查助手 macOS 构建总结"
+        echo "========================================"
+        echo "版本: v${{ steps.version.outputs.version }}"
+        echo ""
+
+        if [ -d "dist/DHI筛查助手.app" ]; then
+            echo "✅ APP构建: 成功"
+            du -sh "dist/DHI筛查助手.app"
+        else
+            echo "❌ APP构建: 失败"
+        fi
+
+        if ls *.dmg 1> /dev/null 2>&1; then
+            echo "✅ DMG创建: 成功"
+            ls -lh *.dmg
+        else
+            echo "⚠️ DMG创建: 未完成"
+        fi
+
+        echo ""
+        echo "📥 下载方式:"
+        echo "1. 访问 Actions 页面"
+        echo "2. 点击此次构建"
+        echo "3. 在页面底部下载 Artifacts"
+        echo ""
+        echo "构建完成！"

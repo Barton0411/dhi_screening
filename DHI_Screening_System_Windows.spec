@@ -2,10 +2,10 @@
 # DHI筛查助手 v4.02 - PyInstaller配置文件 (Windows版本)
 # 伊利液奶奶科院
 
-# 应用信息
-APP_NAME = 'DHI筛查助手'
+# 应用信息 - 使用英文名避免Windows编码问题
+APP_NAME = 'DHI_Screening_System'
 APP_VERSION = '4.02'
-APP_DESCRIPTION = '伊利液奶奶科院 - DHI数据分析与乳房炎监测系统'
+APP_DESCRIPTION = 'DHI Data Analysis and Mastitis Monitoring System'
 
 # 分析配置
 a = Analysis(

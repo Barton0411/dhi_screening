@@ -2,9 +2,12 @@
 ; Yili Liquid Milk Research Institute
 ; Copyright (C) 2025 Yili Liquid Milk Research Institute
 
-#define MyAppName "DHI Screening Analysis System"
-#define MyAppNameChinese "DHI筛查分析系统"
-#define MyAppVersion "4.01"
+; 强制使用UTF-8编码
+#pragma codepage(65001)
+
+#define MyAppName "DHI Screening Assistant"
+#define MyAppNameChinese "DHI筛查助手"
+#define MyAppVersion "4.02"
 #define MyAppPublisher "Yili Liquid Milk Research Institute"
 #define MyAppURL "https://github.com/Barton0411/dhi_screening"
 #define MyAppExeName "DHI_Screening_System.exe"
@@ -13,9 +16,9 @@
 [Setup]
 ; Application Basic Information
 AppId={{B6F5E7D4-8A2C-4F1B-9E3D-7A6C8B9D0E1F}
-AppName={#MyAppNameChinese}
+AppName={#MyAppName}
 AppVersion={#MyAppVersion}
-AppVerName={#MyAppNameChinese} v{#MyAppVersion}
+AppVerName={#MyAppName} v{#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
@@ -23,8 +26,8 @@ AppUpdatesURL={#MyAppURL}
 AppCopyright=Copyright (C) 2025 {#MyAppPublisher}
 
 ; Installation Settings
-DefaultDirName={autopf}\{#MyAppNameChinese}
-DefaultGroupName={#MyAppNameChinese}
+DefaultDirName={autopf}\DHI_Screening_Assistant
+DefaultGroupName=DHI Screening Assistant
 AllowNoIcons=yes
 LicenseFile=LICENSE.txt
 OutputDir=installer
@@ -34,7 +37,7 @@ Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
 
-; System Requirements - 兼容更多Windows系统
+; System Requirements
 MinVersion=6.1
 ArchitecturesAllowed=x86 x64 arm64
 ArchitecturesInstallIn64BitMode=x64 arm64
@@ -44,40 +47,35 @@ PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=dialog
 
 ; Uninstall Settings
-UninstallDisplayIcon={app}\{#MyAppExeName}
-UninstallDisplayName={#MyAppNameChinese} v{#MyAppVersion}
+UninstallDisplayIcon={app}\whg3r-qi1nv-001.ico
+UninstallDisplayName={#MyAppName} v{#MyAppVersion}
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checked
 
 [Files]
 ; Main Program Folder (onedir mode complete folder)
 Source: "dist\DHI_Screening_System\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Icon file - ensure it's copied
+Source: "whg3r-qi1nv-001.ico"; DestDir: "{app}"; Flags: ignoreversion
 ; Documentation
-Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "操作说明.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist; DestName: "Operation_Manual.md"
+Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
-; Configuration Files (already included in dist folder)
-; Source: "config.yaml"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
-; Source: "rules.yaml"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
-; Icon File (already included in dist folder)
-; Source: "whg3r-qi1nv-001.ico"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]
 ; Start Menu Program Group
-Name: "{group}\{#MyAppNameChinese}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\whg3r-qi1nv-001.ico"
-Name: "{group}\使用说明"; Filename: "{app}\Operation_Manual.md"; Flags: createonlyiffileexists
-Name: "{group}\Uninstall {#MyAppNameChinese}"; Filename: "{uninstallexe}"
+Name: "{group}\DHI Screening Assistant"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\whg3r-qi1nv-001.ico"
+Name: "{group}\Uninstall DHI Screening Assistant"; Filename: "{uninstallexe}"
 
-; Desktop Shortcut
-Name: "{autodesktop}\{#MyAppNameChinese}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\whg3r-qi1nv-001.ico"; Tasks: desktopicon
+; Desktop Shortcut - default checked
+Name: "{autodesktop}\DHI Screening Assistant"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\whg3r-qi1nv-001.ico"; Tasks: desktopicon
 
 [Run]
 ; Option to run program after installation
-Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppNameChinese, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,DHI Screening Assistant}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
 ; Delete user data folders when uninstalling (optional)
@@ -94,16 +92,9 @@ begin
   // Check if old version is already installed
   if RegKeyExists(HKEY_LOCAL_MACHINE, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{B6F5E7D4-8A2C-4F1B-9E3D-7A6C8B9D0E1F}_is1') then
   begin
-    if MsgBox('An old version of DHI Screening Analysis System is detected. Do you want to continue installing the new version?', mbConfirmation, MB_YESNO) = IDNO then
+    if MsgBox('An old version is detected. Do you want to continue installing the new version?', mbConfirmation, MB_YESNO) = IDNO then
       Result := False;
   end;
-end;
-
-function PrepareToInstall(var NeedsRestart: Boolean): String;
-begin
-  Result := '';
-  // Pre-installation preparation
-  // You can add dependency checks, service stops, etc. here
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -111,6 +102,5 @@ begin
   if CurStep = ssPostInstall then
   begin
     // Post-installation processing
-    // You can add registry settings, configuration file initialization, etc. here
   end;
-end; 
+end;

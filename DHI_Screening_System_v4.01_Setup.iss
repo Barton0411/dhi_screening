@@ -36,8 +36,8 @@ WizardStyle=modern
 
 ; System Requirements - 兼容更多Windows系统
 MinVersion=6.1
-ArchitecturesAllowed=x86 x64
-ArchitecturesInstallIn64BitMode=x64
+ArchitecturesAllowed=x86 x64 arm64
+ArchitecturesInstallIn64BitMode=x64 arm64
 
 ; Permission Settings
 PrivilegesRequired=admin

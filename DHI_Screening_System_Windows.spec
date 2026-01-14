@@ -161,6 +161,10 @@ a = Analysis(
 # Python包配置
 pyz = PYZ(a.pure, a.zipped_data, cipher=None)
 
+# 检查版本信息文件是否存在
+import os
+VERSION_FILE = 'version_info.txt' if os.path.exists('version_info.txt') else None
+
 # 可执行文件配置 (onedir模式)
 exe = EXE(
     pyz,
@@ -179,7 +183,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon='whg3r-qi1nv-001.ico',
-    version='version_info.txt'  # Windows版本信息文件
+    version=VERSION_FILE  # Windows版本信息文件（如果存在）
 )
 
 # 文件收集配置 (onedir模式)

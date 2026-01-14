@@ -3649,11 +3649,8 @@ class DataProcessor:
                 # 5. 治疗
                 if self._check_treatment_criteria(cow, treatment_config.get('treatment', {})):
                     treatments.append('治疗')
-                
-                # 如果没有符合任何条件，且启用了默认治疗
-                if not treatments and treatment_config.get('default_treatment', True):
-                    treatments.append('治疗')
-                
+
+                # 根据需求：有符合的处置办法就显示，没有就显示"无"
                 treatment_results.append(','.join(treatments) if treatments else '无')
             
             result_df['treatment_methods'] = treatment_results
@@ -3775,36 +3772,45 @@ class DataProcessor:
             breeding_statuses = blind_config.get('breeding_status', [])
             if breeding_statuses and cow.get('breeding_status') not in breeding_statuses:
                 return False
-            
+
+            # 检查产奶量
+            if 'yield_operator' in blind_config and 'yield_value' in blind_config:
+                if not self._compare_value(
+                    cow.get('recent_7day_avg_yield'),
+                    blind_config['yield_operator'],
+                    blind_config['yield_value']
+                ):
+                    return False
+
             # 检查在胎天数
             if 'gestation_operator' in blind_config and 'gestation_value' in blind_config:
                 if not self._compare_value(
-                    cow.get('gestation_days'), 
-                    blind_config['gestation_operator'], 
+                    cow.get('gestation_days'),
+                    blind_config['gestation_operator'],
                     blind_config['gestation_value']
                 ):
                     return False
-            
+
             # 检查发病次数
             if 'mastitis_operator' in blind_config and 'mastitis_value' in blind_config:
                 if not self._compare_value(
-                    cow.get('mastitis_count'), 
-                    blind_config['mastitis_operator'], 
+                    cow.get('mastitis_count'),
+                    blind_config['mastitis_operator'],
                     blind_config['mastitis_value']
                 ):
                     return False
-            
+
             # 检查泌乳天数
             if 'lactation_operator' in blind_config and 'lactation_value' in blind_config:
                 if not self._compare_value(
-                    cow.get('lactation_days'), 
-                    blind_config['lactation_operator'], 
+                    cow.get('lactation_days'),
+                    blind_config['lactation_operator'],
                     blind_config['lactation_value']
                 ):
                     return False
-            
+
             return True
-            
+
         except Exception as e:
             logger.warning(f"检查瞎乳区条件时出错: {e}")
             return False
@@ -3813,61 +3819,112 @@ class DataProcessor:
         """检查提前干奶条件"""
         if not early_dry_config.get('enabled', False):
             return False
-        
+
         try:
             # 检查繁殖状态
             breeding_statuses = early_dry_config.get('breeding_status', [])
             if breeding_statuses and cow.get('breeding_status') not in breeding_statuses:
                 return False
-            
+
+            # 检查产奶量
+            if 'yield_operator' in early_dry_config and 'yield_value' in early_dry_config:
+                if not self._compare_value(
+                    cow.get('recent_7day_avg_yield'),
+                    early_dry_config['yield_operator'],
+                    early_dry_config['yield_value']
+                ):
+                    return False
+
             # 检查在胎天数
             if 'gestation_operator' in early_dry_config and 'gestation_value' in early_dry_config:
                 if not self._compare_value(
-                    cow.get('gestation_days'), 
-                    early_dry_config['gestation_operator'], 
+                    cow.get('gestation_days'),
+                    early_dry_config['gestation_operator'],
                     early_dry_config['gestation_value']
                 ):
                     return False
-            
+
             # 检查发病次数
             if 'mastitis_operator' in early_dry_config and 'mastitis_value' in early_dry_config:
                 if not self._compare_value(
-                    cow.get('mastitis_count'), 
-                    early_dry_config['mastitis_operator'], 
+                    cow.get('mastitis_count'),
+                    early_dry_config['mastitis_operator'],
                     early_dry_config['mastitis_value']
                 ):
                     return False
-            
+
             # 检查泌乳天数
             if 'lactation_operator' in early_dry_config and 'lactation_value' in early_dry_config:
                 if not self._compare_value(
-                    cow.get('lactation_days'), 
-                    early_dry_config['lactation_operator'], 
+                    cow.get('lactation_days'),
+                    early_dry_config['lactation_operator'],
                     early_dry_config['lactation_value']
                 ):
                     return False
-            
+
             return True
-            
+
         except Exception as e:
             logger.warning(f"检查提前干奶条件时出错: {e}")
             return False
     
     def _check_treatment_criteria(self, cow: pd.Series, treatment_config: Dict) -> bool:
-        """检查治疗条件"""
+        """检查治疗条件
+
+        根据需求文档，治疗的默认条件：
+        - 繁殖状态：初检孕&复检孕&干奶&妊娠
+        - 在胎天数：>=0天
+        - 产奶量：>=0kg
+        - 发病次数：<=2次
+        - 泌乳天数：>=0天
+        """
         if not treatment_config.get('enabled', False):
             return False
-        
+
         try:
-            # 检查发病次数（治疗通常是发病次数较少的）
-            max_mastitis = treatment_config.get('max_mastitis_count', float('inf'))
-            if cow.get('mastitis_count', float('inf')) > max_mastitis:
+            # 检查繁殖状态
+            breeding_statuses = treatment_config.get('breeding_status', [])
+            if breeding_statuses and cow.get('breeding_status') not in breeding_statuses:
                 return False
-            
-            # 其他治疗条件可以根据需要添加
-            
+
+            # 检查产奶量（如果配置了）
+            if 'yield_operator' in treatment_config and 'yield_value' in treatment_config:
+                if not self._compare_value(
+                    cow.get('recent_7day_avg_yield'),
+                    treatment_config['yield_operator'],
+                    treatment_config['yield_value']
+                ):
+                    return False
+
+            # 检查发病次数
+            if 'mastitis_operator' in treatment_config and 'mastitis_value' in treatment_config:
+                if not self._compare_value(
+                    cow.get('mastitis_count'),
+                    treatment_config['mastitis_operator'],
+                    treatment_config['mastitis_value']
+                ):
+                    return False
+
+            # 检查泌乳天数
+            if 'lactation_operator' in treatment_config and 'lactation_value' in treatment_config:
+                if not self._compare_value(
+                    cow.get('lactation_days'),
+                    treatment_config['lactation_operator'],
+                    treatment_config['lactation_value']
+                ):
+                    return False
+
+            # 检查在胎天数（如果配置了）
+            if 'gestation_operator' in treatment_config and 'gestation_value' in treatment_config:
+                if not self._compare_value(
+                    cow.get('gestation_days'),
+                    treatment_config['gestation_operator'],
+                    treatment_config['gestation_value']
+                ):
+                    return False
+
             return True
-            
+
         except Exception as e:
             logger.warning(f"检查治疗条件时出错: {e}")
             return False

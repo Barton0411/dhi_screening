@@ -8467,19 +8467,20 @@ class MainWindow(QMainWindow):
         
         # 创建月份复选框，按年-月排序
         sorted_months = sorted(available_months)
-        print(f"按顺序创建 {len(sorted_months)} 个月份复选框")
-        
+        last_month = sorted_months[-1] if sorted_months else None  # 获取最后一个月份（最新数据）
+        print(f"按顺序创建 {len(sorted_months)} 个月份复选框，默认选择最新月份: {last_month}")
+
         for i, month in enumerate(sorted_months):
             cb = QCheckBox(month)
-            cb.setChecked(True)  # 默认全选
+            cb.setChecked(month == last_month)  # 默认只选择最新月份
             self.chronic_month_checkboxes[month] = cb
-            
+
             # 计算行列位置（每行4个）
             row = i // 4
             col = i % 4
             layout.addWidget(cb, row, col)
-        
-        print(f"成功创建 {len(sorted_months)} 个月份复选框")
+
+        print(f"成功创建 {len(sorted_months)} 个月份复选框，默认选择: {last_month}")
         
         # 添加全选/全不选按钮
         button_row = (len(sorted_months) - 1) // 4 + 1
@@ -8516,17 +8517,32 @@ class MainWindow(QMainWindow):
         
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(15, 15, 15, 15)
-        
+
+        # 繁殖状态提示信息
+        breeding_hints = {
+            'cull': '适用于：未孕牛',
+            'isolate': '适用于：未孕牛',
+            'blind_quarter': '适用于：怀孕牛',
+            'early_dry': '适用于：怀孕牛',
+            'treatment': '适用于：怀孕牛'
+        }
+
         # 标题行
         title_layout = QHBoxLayout()
-        
+
         # 启用复选框
         enabled_cb = QCheckBox(f"{icon} {method_name}")
         enabled_cb.setStyleSheet("font-weight: bold; color: black; background-color: white;")
         enabled_cb.setChecked(True)  # 默认启用
         title_layout.addWidget(enabled_cb)
+
+        # 添加繁殖状态提示
+        hint_label = QLabel(breeding_hints.get(method_key, ''))
+        hint_label.setStyleSheet("color: #6c757d; font-size: 11px; font-style: italic; background-color: transparent;")
+        title_layout.addWidget(hint_label)
+
         title_layout.addStretch()
-        
+
         layout.addLayout(title_layout)
         
         # 配置区域（默认显示）
@@ -8599,24 +8615,50 @@ class MainWindow(QMainWindow):
             widget.yield_spin = yield_spin
             
         elif method_key == 'blind_quarter':  # 瞎乳区
-            # 在胎天数条件
+            # 产奶量条件（需求：>=15kg）
+            yield_layout = QHBoxLayout()
+            yield_combo = QComboBox()
+            yield_combo.addItems(["<", "<=", "=", ">=", ">"])
+            yield_combo.setCurrentText(">=")
+            yield_combo.setStyleSheet(form_styles)
+            yield_combo.setFixedWidth(60)
+
+            yield_spin = QDoubleSpinBox()
+            yield_spin.setRange(0, 100)
+            yield_spin.setValue(15)
+            yield_spin.setSuffix("kg")
+            yield_spin.setStyleSheet(form_styles)
+
+            yield_layout.addWidget(yield_combo)
+            yield_layout.addWidget(yield_spin)
+            yield_layout.addStretch()
+
+            yield_widget = QWidget()
+            yield_widget.setLayout(yield_layout)
+            yield_label = QLabel("产奶量:")
+            yield_label.setStyleSheet("color: black; background-color: white; font-weight: bold;")
+            config_layout.addRow(yield_label, yield_widget)
+            widget.yield_combo = yield_combo
+            widget.yield_spin = yield_spin
+
+            # 在胎天数条件（需求：<180天）
             gestation_layout = QHBoxLayout()
             gestation_combo = QComboBox()
             gestation_combo.addItems(["<", "<=", "=", ">=", ">"])
-            gestation_combo.setCurrentText("<=")
+            gestation_combo.setCurrentText("<")
             gestation_combo.setStyleSheet(form_styles)
             gestation_combo.setFixedWidth(60)
-            
+
             gestation_spin = QSpinBox()
             gestation_spin.setRange(0, 300)
             gestation_spin.setValue(180)
             gestation_spin.setSuffix("天")
             gestation_spin.setStyleSheet(form_styles)
-            
+
             gestation_layout.addWidget(gestation_combo)
             gestation_layout.addWidget(gestation_spin)
             gestation_layout.addStretch()
-            
+
             gestation_widget = QWidget()
             gestation_widget.setLayout(gestation_layout)
             config_layout.addRow("在胎天数:", gestation_widget)
@@ -8624,99 +8666,190 @@ class MainWindow(QMainWindow):
             widget.gestation_spin = gestation_spin
             
         elif method_key == 'early_dry':  # 提前干奶
-            # 在胎天数条件
+            # 产奶量条件（需求：>=0kg）
+            yield_layout = QHBoxLayout()
+            yield_combo = QComboBox()
+            yield_combo.addItems(["<", "<=", "=", ">=", ">"])
+            yield_combo.setCurrentText(">=")
+            yield_combo.setStyleSheet(form_styles)
+            yield_combo.setFixedWidth(60)
+
+            yield_spin = QDoubleSpinBox()
+            yield_spin.setRange(0, 100)
+            yield_spin.setValue(0)
+            yield_spin.setSuffix("kg")
+            yield_spin.setStyleSheet(form_styles)
+
+            yield_layout.addWidget(yield_combo)
+            yield_layout.addWidget(yield_spin)
+            yield_layout.addStretch()
+
+            yield_widget = QWidget()
+            yield_widget.setLayout(yield_layout)
+            yield_label = QLabel("产奶量:")
+            yield_label.setStyleSheet("color: black; background-color: white; font-weight: bold;")
+            config_layout.addRow(yield_label, yield_widget)
+            widget.yield_combo = yield_combo
+            widget.yield_spin = yield_spin
+
+            # 在胎天数条件（需求：>=180天）
             gestation_layout = QHBoxLayout()
             gestation_combo = QComboBox()
             gestation_combo.addItems(["<", "<=", "=", ">=", ">"])
             gestation_combo.setCurrentText(">=")
             gestation_combo.setStyleSheet(form_styles)
             gestation_combo.setFixedWidth(60)
-            
+
             gestation_spin = QSpinBox()
             gestation_spin.setRange(0, 300)
             gestation_spin.setValue(180)
             gestation_spin.setSuffix("天")
             gestation_spin.setStyleSheet(form_styles)
-            
+
             gestation_layout.addWidget(gestation_combo)
             gestation_layout.addWidget(gestation_spin)
             gestation_layout.addStretch()
-            
+
             gestation_widget = QWidget()
             gestation_widget.setLayout(gestation_layout)
             config_layout.addRow("在胎天数:", gestation_widget)
             widget.gestation_combo = gestation_combo
             widget.gestation_spin = gestation_spin
-        
+
+        elif method_key == 'treatment':  # 治疗
+            # 产奶量条件（需求：>=0kg）
+            yield_layout = QHBoxLayout()
+            yield_combo = QComboBox()
+            yield_combo.addItems(["<", "<=", "=", ">=", ">"])
+            yield_combo.setCurrentText(">=")
+            yield_combo.setStyleSheet(form_styles)
+            yield_combo.setFixedWidth(60)
+
+            yield_spin = QDoubleSpinBox()
+            yield_spin.setRange(0, 100)
+            yield_spin.setValue(0)
+            yield_spin.setSuffix("kg")
+            yield_spin.setStyleSheet(form_styles)
+
+            yield_layout.addWidget(yield_combo)
+            yield_layout.addWidget(yield_spin)
+            yield_layout.addStretch()
+
+            yield_widget = QWidget()
+            yield_widget.setLayout(yield_layout)
+            yield_label = QLabel("产奶量:")
+            yield_label.setStyleSheet("color: black; background-color: white; font-weight: bold;")
+            config_layout.addRow(yield_label, yield_widget)
+            widget.yield_combo = yield_combo
+            widget.yield_spin = yield_spin
+
+            # 在胎天数条件（需求：>=0天）
+            gestation_layout = QHBoxLayout()
+            gestation_combo = QComboBox()
+            gestation_combo.addItems(["<", "<=", "=", ">=", ">"])
+            gestation_combo.setCurrentText(">=")
+            gestation_combo.setStyleSheet(form_styles)
+            gestation_combo.setFixedWidth(60)
+
+            gestation_spin = QSpinBox()
+            gestation_spin.setRange(0, 300)
+            gestation_spin.setValue(0)
+            gestation_spin.setSuffix("天")
+            gestation_spin.setStyleSheet(form_styles)
+
+            gestation_layout.addWidget(gestation_combo)
+            gestation_layout.addWidget(gestation_spin)
+            gestation_layout.addStretch()
+
+            gestation_widget = QWidget()
+            gestation_widget.setLayout(gestation_layout)
+            config_layout.addRow("在胎天数:", gestation_widget)
+            widget.gestation_combo = gestation_combo
+            widget.gestation_spin = gestation_spin
+
         # 公共配置项
-        # 发病次数条件
+        # 发病次数条件（治疗默认<=2，其他默认>=2）
         mastitis_layout = QHBoxLayout()
         mastitis_combo = QComboBox()
         mastitis_combo.addItems(["<", "<=", "=", ">=", ">"])
-        mastitis_combo.setCurrentText(">=")
+        # 治疗的发病次数默认 <=2，其他默认 >=2
+        if method_key == 'treatment':
+            mastitis_combo.setCurrentText("<=")
+        else:
+            mastitis_combo.setCurrentText(">=")
         mastitis_combo.setStyleSheet(form_styles)
         mastitis_combo.setFixedWidth(60)
-        
+
         mastitis_spin = QSpinBox()
         mastitis_spin.setRange(0, 10)
         mastitis_spin.setValue(2)
         mastitis_spin.setSuffix("次")
         mastitis_spin.setStyleSheet(form_styles)
-        
+
         mastitis_layout.addWidget(mastitis_combo)
         mastitis_layout.addWidget(mastitis_spin)
         mastitis_layout.addStretch()
-        
+
         mastitis_widget = QWidget()
         mastitis_widget.setLayout(mastitis_layout)
         config_layout.addRow("发病次数:", mastitis_widget)
         widget.mastitis_combo = mastitis_combo
         widget.mastitis_spin = mastitis_spin
-        
-        # 泌乳天数条件
+
+        # 泌乳天数条件（瞎乳区/提前干奶/治疗默认>=0，淘汰/禁配隔离默认>=200）
         lactation_layout = QHBoxLayout()
         lactation_combo = QComboBox()
         lactation_combo.addItems(["<", "<=", "=", ">=", ">"])
         lactation_combo.setCurrentText(">=")
         lactation_combo.setStyleSheet(form_styles)
         lactation_combo.setFixedWidth(60)
-        
+
         lactation_spin = QSpinBox()
         lactation_spin.setRange(0, 500)
-        lactation_spin.setValue(200)
+        # 瞎乳区/提前干奶/治疗的泌乳天数默认 >=0，淘汰/禁配隔离默认 >=200
+        if method_key in ['blind_quarter', 'early_dry', 'treatment']:
+            lactation_spin.setValue(0)
+        else:
+            lactation_spin.setValue(200)
         lactation_spin.setSuffix("天")
         lactation_spin.setStyleSheet(form_styles)
-        
+
         lactation_layout.addWidget(lactation_combo)
         lactation_layout.addWidget(lactation_spin)
         lactation_layout.addStretch()
-        
+
         lactation_widget = QWidget()
         lactation_widget.setLayout(lactation_layout)
         config_layout.addRow("泌乳天数:", lactation_widget)
         widget.lactation_combo = lactation_combo
         widget.lactation_spin = lactation_spin
-        
-        # 繁殖状态多选（动态获取）
+
+        # 繁殖状态多选
         breeding_status_label = QLabel("繁殖状态:")
         breeding_status_widget = QWidget()
         breeding_status_layout = QGridLayout(breeding_status_widget)
         breeding_status_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # 默认状态选项
-        default_statuses = ['产犊', '禁配', '可配', '已配', '产后未配', '初检空怀', '发情未配', '流产未配', '已配未检']
+
+        # 根据处置办法类型设置不同的默认繁殖状态
+        # 淘汰/禁配隔离：产犊、禁配、可配、已配、产后未配、初检空怀、发情未配、流产未配、已配未检
+        # 瞎乳区/提前干奶/治疗：初检孕、复检孕、干奶、妊娠
+        if method_key in ['cull', 'isolate']:
+            default_statuses = ['产犊', '禁配', '可配', '已配', '产后未配', '初检空怀', '发情未配', '流产未配', '已配未检']
+        else:
+            default_statuses = ['初检孕', '复检孕', '干奶', '妊娠']
+
         widget.breeding_checkboxes = {}
-        
+
         for i, status in enumerate(default_statuses):
             cb = QCheckBox(status)
             cb.setChecked(True)  # 默认全选
             widget.breeding_checkboxes[status] = cb
-            
+
             # 计算行列位置（每行3个）
             row = i // 3
             col = i % 3
             breeding_status_layout.addWidget(cb, row, col)
-        
+
         config_layout.addRow(breeding_status_label, breeding_status_widget)
         
         # 启用/禁用配置区域
@@ -9101,7 +9234,7 @@ class MainWindow(QMainWindow):
     def build_treatment_config(self) -> Dict[str, Any]:
         """构建处置办法配置"""
         config = {}
-        
+
         for method_key, widget in self.treatment_configs.items():
             if widget.enabled_cb.isChecked():
                 method_config = {
@@ -9112,25 +9245,21 @@ class MainWindow(QMainWindow):
                     'lactation_value': widget.lactation_spin.value(),
                     'breeding_status': [status for status, cb in widget.breeding_checkboxes.items() if cb.isChecked()]
                 }
-                
-                # 添加特定配置
-                if method_key == 'cull' and hasattr(widget, 'yield_combo'):
+
+                # 添加产奶量配置（淘汰、禁配隔离、瞎乳区、提前干奶、治疗都有）
+                if hasattr(widget, 'yield_combo'):
                     method_config['yield_operator'] = widget.yield_combo.currentText()
                     method_config['yield_value'] = widget.yield_spin.value()
-                elif method_key == 'isolate' and hasattr(widget, 'yield_combo'):
-                    method_config['yield_operator'] = widget.yield_combo.currentText()
-                    method_config['yield_value'] = widget.yield_spin.value()
-                elif method_key == 'blind_quarter' and hasattr(widget, 'gestation_combo'):
+
+                # 添加在胎天数配置（瞎乳区、提前干奶、治疗有）
+                if hasattr(widget, 'gestation_combo'):
                     method_config['gestation_operator'] = widget.gestation_combo.currentText()
                     method_config['gestation_value'] = widget.gestation_spin.value()
-                elif method_key == 'early_dry' and hasattr(widget, 'gestation_combo'):
-                    method_config['gestation_operator'] = widget.gestation_combo.currentText()
-                    method_config['gestation_value'] = widget.gestation_spin.value()
-                
+
                 config[method_key] = method_config
             else:
                 config[method_key] = {'enabled': False}
-        
+
         return config
     
     def show_mastitis_results_preview(self, results_df):
@@ -10269,7 +10398,7 @@ class DHIDesktopApp:
             
             # 创建QApplication
             self.app = QApplication(sys.argv)
-            self.app.setApplicationName("DHI智能筛选大师")
+            self.app.setApplicationName("DHI筛查助手")
             self.app.setApplicationVersion("2.0.0")
             self.app.setOrganizationName("DHI")
             self.app.setOrganizationDomain("dhi.com")

@@ -3668,7 +3668,7 @@ class MainWindow(QMainWindow):
         scc_threshold_combo.addItems(["<", "<=", "=", ">=", ">"])
         scc_threshold_combo.setCurrentText(">=")
         scc_threshold_combo.setStyleSheet(form_styles)
-        scc_threshold_combo.setFixedWidth(60)
+        scc_threshold_combo.setFixedWidth(70)
         
         self.scc_threshold_spin = QDoubleSpinBox()
         self.scc_threshold_spin.setRange(0.1, 100.0)
@@ -8567,7 +8567,7 @@ class MainWindow(QMainWindow):
             yield_combo.addItems(["<", "<=", "=", ">=", ">"])
             yield_combo.setCurrentText("<=")
             yield_combo.setStyleSheet(form_styles)
-            yield_combo.setFixedWidth(60)
+            yield_combo.setFixedWidth(70)
             
             yield_spin = QDoubleSpinBox()
             yield_spin.setRange(0, 100)
@@ -8594,7 +8594,7 @@ class MainWindow(QMainWindow):
             yield_combo.addItems(["<", "<=", "=", ">=", ">"])
             yield_combo.setCurrentText(">=")
             yield_combo.setStyleSheet(form_styles)
-            yield_combo.setFixedWidth(60)
+            yield_combo.setFixedWidth(70)
             
             yield_spin = QDoubleSpinBox()
             yield_spin.setRange(0, 100)
@@ -8621,7 +8621,7 @@ class MainWindow(QMainWindow):
             yield_combo.addItems(["<", "<=", "=", ">=", ">"])
             yield_combo.setCurrentText(">=")
             yield_combo.setStyleSheet(form_styles)
-            yield_combo.setFixedWidth(60)
+            yield_combo.setFixedWidth(70)
 
             yield_spin = QDoubleSpinBox()
             yield_spin.setRange(0, 100)
@@ -8647,7 +8647,7 @@ class MainWindow(QMainWindow):
             gestation_combo.addItems(["<", "<=", "=", ">=", ">"])
             gestation_combo.setCurrentText("<")
             gestation_combo.setStyleSheet(form_styles)
-            gestation_combo.setFixedWidth(60)
+            gestation_combo.setFixedWidth(70)
 
             gestation_spin = QSpinBox()
             gestation_spin.setRange(0, 300)
@@ -8672,7 +8672,7 @@ class MainWindow(QMainWindow):
             yield_combo.addItems(["<", "<=", "=", ">=", ">"])
             yield_combo.setCurrentText(">=")
             yield_combo.setStyleSheet(form_styles)
-            yield_combo.setFixedWidth(60)
+            yield_combo.setFixedWidth(70)
 
             yield_spin = QDoubleSpinBox()
             yield_spin.setRange(0, 100)
@@ -8698,7 +8698,7 @@ class MainWindow(QMainWindow):
             gestation_combo.addItems(["<", "<=", "=", ">=", ">"])
             gestation_combo.setCurrentText(">=")
             gestation_combo.setStyleSheet(form_styles)
-            gestation_combo.setFixedWidth(60)
+            gestation_combo.setFixedWidth(70)
 
             gestation_spin = QSpinBox()
             gestation_spin.setRange(0, 300)
@@ -8723,7 +8723,7 @@ class MainWindow(QMainWindow):
             yield_combo.addItems(["<", "<=", "=", ">=", ">"])
             yield_combo.setCurrentText(">=")
             yield_combo.setStyleSheet(form_styles)
-            yield_combo.setFixedWidth(60)
+            yield_combo.setFixedWidth(70)
 
             yield_spin = QDoubleSpinBox()
             yield_spin.setRange(0, 100)
@@ -8749,7 +8749,7 @@ class MainWindow(QMainWindow):
             gestation_combo.addItems(["<", "<=", "=", ">=", ">"])
             gestation_combo.setCurrentText(">=")
             gestation_combo.setStyleSheet(form_styles)
-            gestation_combo.setFixedWidth(60)
+            gestation_combo.setFixedWidth(70)
 
             gestation_spin = QSpinBox()
             gestation_spin.setRange(0, 300)
@@ -8778,7 +8778,7 @@ class MainWindow(QMainWindow):
         else:
             mastitis_combo.setCurrentText(">=")
         mastitis_combo.setStyleSheet(form_styles)
-        mastitis_combo.setFixedWidth(60)
+        mastitis_combo.setFixedWidth(70)
 
         mastitis_spin = QSpinBox()
         mastitis_spin.setRange(0, 10)
@@ -8802,7 +8802,7 @@ class MainWindow(QMainWindow):
         lactation_combo.addItems(["<", "<=", "=", ">=", ">"])
         lactation_combo.setCurrentText(">=")
         lactation_combo.setStyleSheet(form_styles)
-        lactation_combo.setFixedWidth(60)
+        lactation_combo.setFixedWidth(70)
 
         lactation_spin = QSpinBox()
         lactation_spin.setRange(0, 500)

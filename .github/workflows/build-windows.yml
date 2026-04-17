@@ -104,10 +104,9 @@ jobs:
       run: |
         Write-Host "Creating Windows installer..."
 
-        # Download and install Inno Setup
-        curl -L -o innosetup.exe https://files.jrsoftware.org/is/6/innosetup-6.2.2.exe
-        Start-Process -FilePath ".\innosetup.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-" -Wait
-        Start-Sleep -Seconds 5
+        # Install Inno Setup via Chocolatey (windows-latest 自带 choco)
+        choco install innosetup --no-progress -y
+        Start-Sleep -Seconds 3
 
         # Find ISCC.exe
         $isccPath = ""

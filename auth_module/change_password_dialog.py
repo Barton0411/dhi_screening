@@ -12,11 +12,14 @@ from PyQt6.QtGui import QFont
 class ChangePasswordDialog(QDialog):
     """修改密码对话框"""
     
-    def __init__(self, parent=None, username=None, auth_service=None):
+    def __init__(
+        self, parent=None, username=None, auth_service=None, required=False
+    ):
         super().__init__(parent)
         self.username = username
         self.auth_service = auth_service or getattr(parent, "auth_service", None)
-        self.setWindowTitle("修改密码")
+        self.required = required
+        self.setWindowTitle("首次登录必须修改密码" if required else "修改密码")
         self.setFixedSize(400, 300)
         
         # 设置窗口标志 - 移除 WindowStaysOnTopHint 以避免 macOS 问题
@@ -36,7 +39,7 @@ class ChangePasswordDialog(QDialog):
         layout.setContentsMargins(40, 30, 40, 30)
         
         # 标题
-        title = QLabel("修改密码")
+        title = QLabel("首次登录必须修改密码" if self.required else "修改密码")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title_font = QFont()
         title_font.setPointSize(16)
@@ -89,6 +92,7 @@ class ChangePasswordDialog(QDialog):
         
         self.cancel_btn = QPushButton("取消")
         self.cancel_btn.clicked.connect(self.reject)
+        self.cancel_btn.setVisible(not self.required)
         
         button_layout.addWidget(self.change_btn)
         button_layout.addWidget(self.cancel_btn)
@@ -182,3 +186,16 @@ class ChangePasswordDialog(QDialog):
             self.accept()
         else:
             QMessageBox.warning(self, "修改失败", message)
+
+    def reject(self):
+        if self.required:
+            QMessageBox.warning(self, "必须修改密码", "完成密码修改后才能继续使用")
+            return
+        super().reject()
+
+    def closeEvent(self, event):
+        if self.required:
+            event.ignore()
+            QMessageBox.warning(self, "必须修改密码", "完成密码修改后才能继续使用")
+            return
+        super().closeEvent(event)

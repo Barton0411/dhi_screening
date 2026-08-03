@@ -16,6 +16,7 @@ from cryptography.fernet import Fernet, InvalidToken
 
 DEFAULT_AUTH_API_BASE_URL = "https://api.genepop.com"
 ALLOWED_AUTH_HOSTS = {"api.genepop.com"}
+YQN_LOGIN_URL = "https://yqnapi.yqndairy.com/auth/login"
 REQUEST_TIMEOUT = (5, 15)
 
 
@@ -30,6 +31,8 @@ class SimpleAuthService:
         self.user_name: Optional[str] = None
         self.token: Optional[str] = None
         self.session_id: Optional[str] = None
+        self.auth_type: Optional[str] = None
+        self.must_change_password = False
         self.session = requests.Session()
         self.session.headers.update(
             {
@@ -134,16 +137,75 @@ class SimpleAuthService:
         response_data = data.get("data") if isinstance(data.get("data"), dict) else {}
         token = response_data.get("token")
         if data.get("success") is True and isinstance(token, str) and token:
-            self.username = username
+            self.username = str(response_data.get("user_id") or username)
             self.user_name = response_data.get("name")
             self.token = token
             self.session_id = token
-            return True, "登录成功", None
+            self.auth_type = "local"
+            self.must_change_password = response_data.get("must_change_password") is True
+            return True, "登录成功", {
+                "must_change_password": self.must_change_password,
+                "auth_type": self.auth_type,
+            }
 
         self.logout()
         if data.get("message") == "用户名或密码错误":
             return False, "账号或密码错误", None
         return False, "认证服务暂时不可用，请稍后重试", None
+
+    def login_yqn(
+        self, username: str, password: str
+    ) -> Tuple[bool, str, Optional[Dict]]:
+        """使用伊起牛账号登录，再换取本软件 JWT；不保存伊起牛密码或令牌。"""
+        yqn_session = requests.Session()
+        yqn_session.trust_env = False
+        try:
+            response = yqn_session.post(
+                YQN_LOGIN_URL,
+                json={"username": username, "password": password},
+                headers={"Content-Type": "application/json", "Accept": "application/json"},
+                timeout=REQUEST_TIMEOUT,
+            )
+            result = response.json()
+            result_data = result.get("data") if isinstance(result, dict) else None
+            yqn_token = result_data.get("access_token") if isinstance(result_data, dict) else None
+            if str(result.get("code")) != "200" or not isinstance(yqn_token, str) or not yqn_token:
+                self.logout()
+                return False, "账号或密码错误", None
+
+            exchange = self.session.post(
+                f"{self.base_url}/api/auth/yqn/exchange",
+                headers={
+                    "Accept": "application/json",
+                    "Authorization": f"Bearer {yqn_token}",
+                },
+                timeout=REQUEST_TIMEOUT,
+            )
+            exchange_data = exchange.json()
+            software_data = (
+                exchange_data.get("data")
+                if isinstance(exchange_data, dict) and isinstance(exchange_data.get("data"), dict)
+                else {}
+            )
+            software_token = software_data.get("token")
+            if not exchange.ok or exchange_data.get("success") is not True or not software_token:
+                self.logout()
+                return False, "伊起牛登录授权失败，请稍后重试", None
+
+            self.username = str(software_data.get("user_id") or username)
+            self.user_name = self.username
+            self.token = str(software_token)
+            self.session_id = self.token
+            self.auth_type = "yqn"
+            self.must_change_password = False
+            return True, "登录成功", {
+                "must_change_password": False,
+                "auth_type": "yqn",
+            }
+        except (requests.RequestException, ValueError):
+            logging.warning("伊起牛登录请求失败")
+            self.logout()
+            return False, "伊起牛登录服务暂时不可用，请稍后重试", None
 
     def change_password(self, current_password: str, new_password: str) -> Tuple[bool, str]:
         _, data = self._request(
@@ -163,6 +225,12 @@ class SimpleAuthService:
         }
         message = data.get("message")
         if data.get("success") is True:
+            response_data = data.get("data") if isinstance(data.get("data"), dict) else {}
+            replacement_token = response_data.get("token")
+            if isinstance(replacement_token, str) and replacement_token:
+                self.token = replacement_token
+                self.session_id = replacement_token
+            self.must_change_password = False
             self.clear_credentials()
             return True, "密码修改成功"
         return False, message if message in allowed else "密码修改失败，请稍后重试"
@@ -181,6 +249,8 @@ class SimpleAuthService:
         self.user_name = None
         self.token = None
         self.session_id = None
+        self.auth_type = None
+        self.must_change_password = False
 
     def save_credentials(self, username: str, password: str, remember: bool = True):
         credential_file = Path.home() / ".protein_screening" / "credentials.enc"

@@ -2017,10 +2017,13 @@ class MainWindow(QMainWindow):
         
         # account_menu.addSeparator()
         
-        change_password_action = QAction("修改密码...", self)
-        change_password_action.setStatusTip("修改当前账号密码")
-        change_password_action.triggered.connect(self.show_change_password)
-        account_menu.addAction(change_password_action)
+        self.change_password_action = QAction("修改密码...", self)
+        self.change_password_action.setStatusTip("修改当前账号密码")
+        self.change_password_action.triggered.connect(self.show_change_password)
+        self.change_password_action.setEnabled(
+            not self.auth_service or self.auth_service.auth_type != "yqn"
+        )
+        account_menu.addAction(self.change_password_action)
         
         # # 邀请码管理
         # invite_code_action = QAction("邀请码管理...", self)

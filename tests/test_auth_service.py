@@ -27,7 +27,12 @@ class AuthServiceTests(unittest.TestCase):
         response = Mock(ok=True)
         response.json.return_value = {
             "success": True,
-            "data": {"token": "synthetic-token", "name": "测试用户"},
+            "data": {
+                "token": "synthetic-token",
+                "name": "测试用户",
+                "must_change_password": True,
+                "auth_type": "local",
+            },
         }
         service.session.request = Mock(return_value=response)
 
@@ -35,9 +40,48 @@ class AuthServiceTests(unittest.TestCase):
 
         self.assertTrue(success)
         self.assertEqual(message, "登录成功")
-        self.assertIsNone(extra)
+        self.assertEqual(extra["auth_type"], "local")
         self.assertEqual(service.username, "test-user")
         self.assertEqual(service.get_user_name(), "测试用户")
+        self.assertTrue(service.must_change_password)
+        self.assertTrue(extra["must_change_password"])
+
+    def test_yqn_login_exchanges_token_without_saving_upstream_token(self):
+        service = self.make_service()
+        upstream_response = Mock(ok=True)
+        upstream_response.json.return_value = {
+            "code": 200,
+            "data": {"access_token": "synthetic-yqn-token"},
+        }
+        upstream_session = Mock()
+        upstream_session.post.return_value = upstream_response
+        exchange_response = Mock(ok=True)
+        exchange_response.json.return_value = {
+            "success": True,
+            "data": {
+                "token": "synthetic-software-token",
+                "user_id": "trusted-yqn-user",
+                "auth_type": "yqn",
+                "must_change_password": False,
+            },
+        }
+        service.session.post = Mock(return_value=exchange_response)
+
+        with patch.object(AUTH_MODULE.requests, "Session", return_value=upstream_session):
+            success, message, extra = service.login_yqn(
+                "typed-user", "synthetic-password"
+            )
+
+        self.assertTrue(success)
+        self.assertEqual(message, "登录成功")
+        self.assertEqual(service.username, "trusted-yqn-user")
+        self.assertEqual(service.token, "synthetic-software-token")
+        self.assertEqual(service.auth_type, "yqn")
+        self.assertFalse(extra["must_change_password"])
+        exchange_headers = service.session.post.call_args.kwargs["headers"]
+        self.assertEqual(
+            exchange_headers["Authorization"], "Bearer synthetic-yqn-token"
+        )
 
     def test_invalid_auth_host_is_rejected(self):
         with self.assertRaises(ValueError):
@@ -49,7 +93,11 @@ class AuthServiceTests(unittest.TestCase):
         service.username = "test-user"
         service.save_credentials("test-user", "old-synthetic-password", True)
         response = Mock(ok=True)
-        response.json.return_value = {"success": True, "message": "密码修改成功"}
+        response.json.return_value = {
+            "success": True,
+            "message": "密码修改成功",
+            "data": {"token": "replacement-token"},
+        }
         service.session.request = Mock(return_value=response)
 
         success, _ = service.change_password(
@@ -57,6 +105,7 @@ class AuthServiceTests(unittest.TestCase):
         )
 
         self.assertTrue(success)
+        self.assertEqual(service.token, "replacement-token")
         self.assertIsNone(service.load_credentials())
         headers = service.session.request.call_args.kwargs["headers"]
         self.assertEqual(headers["Authorization"], "Bearer synthetic-token")

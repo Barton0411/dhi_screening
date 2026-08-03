@@ -1,7 +1,7 @@
 """安全登录对话框。"""
 
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+    QComboBox, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QMessageBox, QWidget, QCheckBox, QSpacerItem,
     QSizePolicy, QGraphicsDropShadowEffect
 )
@@ -33,8 +33,9 @@ class LoginDialog(QDialog):
         """
         super().__init__(parent)
         self.auth_service = auth_service or AuthService()
+        self.login_type = "local"
         self.setWindowTitle("安全登录")
-        self.setFixedSize(380, 360)
+        self.setFixedSize(400, 410)
         
         # 设置窗口标志 - 移除 WindowStaysOnTopHint 以避免 macOS 问题
         self.setWindowFlags(
@@ -69,6 +70,12 @@ class LoginDialog(QDialog):
         title.setFont(title_font)
         title.setStyleSheet("color: #333; margin-bottom: 5px;")
         layout.addWidget(title)
+
+        self.login_type_combo = QComboBox()
+        self.login_type_combo.addItem("原账号密码登录", "local")
+        self.login_type_combo.addItem("伊起牛登录", "yqn")
+        self.login_type_combo.currentIndexChanged.connect(self._on_login_type_changed)
+        layout.addWidget(self.login_type_combo)
         
         # 添加一些间距
         layout.addSpacerItem(QSpacerItem(20, 25, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed))
@@ -233,6 +240,20 @@ class LoginDialog(QDialog):
                 self.remember_checkbox.setChecked(True)
             else:
                 self.remember_checkbox.setChecked(False)
+
+    def _on_login_type_changed(self):
+        self.login_type = self.login_type_combo.currentData()
+        is_local = self.login_type == "local"
+        self.register_button.setVisible(is_local)
+        self.remember_checkbox.setVisible(is_local)
+        self.forgot_password_label.setVisible(is_local)
+        self.remember_checkbox.setChecked(False)
+        self.password_input.clear()
+        if is_local:
+            self._load_saved_credentials()
+        else:
+            self.username_input.clear()
+            self.username_input.setFocus()
     
     def show_waiting(self, message: str = "正在连接服务器..."):
         """显示等待提示"""
@@ -243,6 +264,7 @@ class LoginDialog(QDialog):
         self.username_input.setEnabled(False)
         self.password_input.setEnabled(False)
         self.remember_checkbox.setEnabled(False)
+        self.login_type_combo.setEnabled(False)
         
     def hide_waiting(self):
         """隐藏等待提示"""
@@ -252,6 +274,7 @@ class LoginDialog(QDialog):
         self.username_input.setEnabled(True)
         self.password_input.setEnabled(True)
         self.remember_checkbox.setEnabled(True)
+        self.login_type_combo.setEnabled(True)
         
     def login(self):
         """处理登录"""
@@ -269,15 +292,40 @@ class LoginDialog(QDialog):
         
     def _process_login(self, username: str, password: str, force: bool = False):
         """处理登录逻辑"""
-        success, message, extra = self.auth_service.login(username, password, force)
+        if self.login_type == "yqn":
+            success, message, extra = self.auth_service.login_yqn(username, password)
+        else:
+            success, message, extra = self.auth_service.login(username, password, force)
         
         if success:
-            # 保存凭证
-            self.auth_service.save_credentials(
-                username, 
-                password, 
-                self.remember_checkbox.isChecked()
-            )
+            password_was_changed = False
+            if self.login_type == "local" and extra and extra.get("must_change_password"):
+                self.hide_waiting()
+                from .change_password_dialog import ChangePasswordDialog
+
+                change_dialog = ChangePasswordDialog(
+                    self,
+                    self.auth_service.username,
+                    auth_service=self.auth_service,
+                    required=True,
+                )
+                if change_dialog.exec() != QDialog.DialogCode.Accepted:
+                    return
+                password_was_changed = True
+
+            if self.login_type == "local":
+                if password_was_changed:
+                    self.auth_service.save_credentials(
+                        self.auth_service.username, "", False
+                    )
+                else:
+                    self.auth_service.save_credentials(
+                        self.auth_service.username,
+                        password,
+                        self.remember_checkbox.isChecked(),
+                    )
+            else:
+                self.auth_service.clear_credentials()
             
             # 发送登录成功信号
             self.login_successful.emit(username)

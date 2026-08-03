@@ -24,6 +24,7 @@
 - 修改密码由 JWT 限定只能修改当前账号；伊起牛登录不走本地改密。
 - 忘记密码不再允许客户端凭“工号+姓名”直接重置，改为联系管理员核验身份。
 - `simple_auth_service.py` 和兼容入口 `simple_auth_service_v2.py` 均不再包含数据库连接能力。
+- HTTPS 客户端显式使用随安装包携带的 `certifi` CA 证书，并禁用环境代理继承，避免 PyInstaller 运行环境出现证书链差异。
 
 ## 自动更新与发布
 
@@ -32,7 +33,7 @@
 - 清单按平台提供 Windows EXE 与 macOS DMG 的 HTTPS 地址、文件大小和 SHA-256。
 - 客户端只接受固定 OSS 域名和固定对象前缀；下载完成后必须同时通过大小和 SHA-256 校验才启动安装。
 - 标签 `v*` 触发 `.github/workflows/release.yml`：
-  1. Windows 和 macOS 并行构建；
+  1. Windows 和 macOS 分别运行认证/更新单元测试并并行构建；
   2. 汇总安装包并生成 `version.json`、`SHA256SUMS.txt`、发布说明；
   3. 先发布 OSS 不可变版本目录；
   4. 两个平台文件都成功后最后更新 OSS `latest/version.json`；

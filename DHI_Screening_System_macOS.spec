@@ -92,6 +92,7 @@ a = Analysis(
         'pydantic',
         'dateutil',
         'requests',
+        'certifi',
         'cryptography',
         'tabulate',
         

@@ -31,6 +31,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller
+      - name: Test authentication and updater
+        shell: bash
+        run: |
+          python -m compileall -q auth_module update_manager.py update_workers.py desktop_app.py scripts
+          python -m unittest discover -s tests -p "test_*.py" -v
       - name: Create Windows version metadata
         shell: pwsh
         run: |
@@ -87,6 +92,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller
           brew install create-dmg
+      - name: Test authentication and updater
+        run: |
+          python -m compileall -q auth_module update_manager.py update_workers.py desktop_app.py scripts
+          python -m unittest discover -s tests -p "test_*.py" -v
       - name: Build macOS application
         run: pyinstaller --clean DHI_Screening_System_macOS.spec
       - name: Build macOS DMG

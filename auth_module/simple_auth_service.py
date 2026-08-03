@@ -11,6 +11,7 @@ from typing import Dict, Optional, Tuple
 from urllib.parse import urlparse
 
 import requests
+import certifi
 from cryptography.fernet import Fernet, InvalidToken
 
 
@@ -34,6 +35,8 @@ class SimpleAuthService:
         self.auth_type: Optional[str] = None
         self.must_change_password = False
         self.session = requests.Session()
+        self.session.trust_env = False
+        self.session.verify = certifi.where()
         self.session.headers.update(
             {
                 "Accept": "application/json",
@@ -159,6 +162,7 @@ class SimpleAuthService:
         """使用伊起牛账号登录，再换取本软件 JWT；不保存伊起牛密码或令牌。"""
         yqn_session = requests.Session()
         yqn_session.trust_env = False
+        yqn_session.verify = certifi.where()
         try:
             response = yqn_session.post(
                 YQN_LOGIN_URL,

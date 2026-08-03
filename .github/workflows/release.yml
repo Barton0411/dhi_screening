@@ -54,7 +54,11 @@ jobs:
           )
           "@ | Out-File version_info.txt -Encoding ASCII
       - name: Build Windows application
-        run: pyinstaller --clean DHI_Screening_System_Windows.spec
+        shell: pwsh
+        run: |
+          pyinstaller --clean DHI_Screening_System_Windows.spec
+          $caBundle = Get-ChildItem "dist" -Recurse -Filter "cacert.pem"
+          if (-not $caBundle) { throw "Packaged CA bundle is missing" }
       - name: Build Windows installer
         shell: pwsh
         run: |
@@ -97,7 +101,9 @@ jobs:
           python -m compileall -q auth_module update_manager.py update_workers.py desktop_app.py scripts
           python -m unittest discover -s tests -p "test_*.py" -v
       - name: Build macOS application
-        run: pyinstaller --clean DHI_Screening_System_macOS.spec
+        run: |
+          pyinstaller --clean DHI_Screening_System_macOS.spec
+          test -n "$(find 'dist/DHI筛查助手.app' -name cacert.pem -print -quit)"
       - name: Build macOS DMG
         run: |
           mkdir -p dmg_temp release

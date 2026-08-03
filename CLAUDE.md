@@ -39,7 +39,7 @@ pyinstaller DHI_Screening_System_Windows.spec
 - `data_processor.py` - Data loading, validation, filtering engine
 - `mastitis_monitoring.py` - Mastitis metrics calculation
 - `urea_tracker.py` - Urea nitrogen analysis with pyqtgraph visualization
-- `auth_module/` - Aliyun MySQL authentication (login, registration, password management)
+- `auth_module/` - HTTPS authentication client (login, invitation registration, password management)
 
 **Configuration**:
 - `config.yaml` - App settings (version, upload limits, logging)
@@ -49,7 +49,8 @@ pyinstaller DHI_Screening_System_Windows.spec
 
 ## Key Technical Details
 
-- **Authentication**: Aliyun Polardb MySQL with Fernet-encrypted local credentials and single-device login
+- **Authentication**: local-account and YQN dual login via `https://api.genepop.com`; legacy local accounts must complete the server-directed first password change, and the desktop client must never contain or use database credentials
+- **Updates**: `VERSION` is the only release version source; signed metadata is not yet available, so downloads are restricted to the project OSS prefix and verified with SHA-256
 - **Async Processing**: QThread workers for file processing (`FileUploadWorker`, `FilteringWorker`)
 - **DPI Awareness**: Responsive scaling for different screen resolutions
 - **Localization**: Complete Chinese UI including pyqtgraph chart menus (`chart_localization.py`)

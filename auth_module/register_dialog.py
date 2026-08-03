@@ -7,8 +7,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QMessageBox, QSpacerItem, QSizePolicy
 )
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont, QIcon
-from pathlib import Path  
+from PyQt6.QtGui import QFont
 import re
 try:
     from .simple_auth_service import SimpleAuthService as AuthService
@@ -33,7 +32,7 @@ class RegisterDialog(QDialog):
         self.auth_service = auth_service or AuthService()
         self.username = None
         
-        self.setWindowTitle("用户注册 - DHI筛查助手")
+        self.setWindowTitle("注册申请")
         self.setFixedSize(400, 530)
         
         # 设置窗口标志 - 移除 WindowStaysOnTopHint 以避免 macOS 问题
@@ -42,11 +41,6 @@ class RegisterDialog(QDialog):
             Qt.WindowType.WindowTitleHint |
             Qt.WindowType.WindowCloseButtonHint
         )
-        
-        # 设置窗口图标
-        icon_path = Path(__file__).parent.parent / "icon.ico"
-        if icon_path.exists():
-            self.setWindowIcon(QIcon(str(icon_path)))
         
         self._setup_ui()
         self._setup_styles()

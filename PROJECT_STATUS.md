@@ -5,8 +5,8 @@
 ## 当前目标与版本
 
 - 仓库：`Barton0411/dhi_screening`
-- 本次发布版本：`v4.02.25`
-- 发布目标：保留现有账号，恢复安全登录与邀请码注册；加入 Windows/macOS 自动更新；在 GitHub Release 和阿里云 OSS 同步留档。
+- 当前正式版本：`v4.02.25`（2026-08-03 已发布）
+- 发布结果：保留现有账号，恢复安全登录与邀请码注册；Windows/macOS 自动更新、GitHub Release 和阿里云 OSS 双备份均已上线。
 - 单一版本源：`VERSION`。`version.py`、启动页、PyInstaller spec、Inno Setup 和 GitHub Actions 均读取或校验它。
 
 ## 认证现状
@@ -41,6 +41,15 @@
 - OSS 路径：
   - 不可变版本：`tools/dhi-screening/releases/v<版本>/`
   - 最新指针：`tools/dhi-screening/latest/version.json`
+
+## v4.02.25 发布记录
+
+- 合并 PR：`#1`；合并提交：`9487537c20c976f2562d3d0e8b20cd32c80f0ce1`
+- 正式 Actions：`30812465203`；Windows、macOS、publish 全部成功
+- GitHub Release：`https://github.com/Barton0411/dhi_screening/releases/tag/v4.02.25`
+- Windows：`DHI-Screening-v4.02.25-Windows-Setup.exe`，49,740,682 字节，SHA-256 `84a41567160c033ea74eeea715ac53c42e6b2107d7fcf832a7791b11893e96b9`
+- macOS：`DHI-Screening-v4.02.25-macOS.dmg`，60,722,701 字节，SHA-256 `5347eea28b54b78129805998d4f463fe2bf57d1215a6ff7b8c60270a38ffb1bb`
+- 已从公网 OSS 实际下载两套安装包，文件大小和 SHA-256 均与 `latest/version.json`、GitHub Release 一致。
 
 ## 发布前后检查
 

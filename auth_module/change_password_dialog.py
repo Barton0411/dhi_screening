@@ -4,7 +4,7 @@
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QMessageBox, QSpacerItem, QSizePolicy
+    QPushButton, QMessageBox
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
@@ -20,7 +20,6 @@ class ChangePasswordDialog(QDialog):
         self.auth_service = auth_service or getattr(parent, "auth_service", None)
         self.required = required
         self.setWindowTitle("首次登录必须修改密码" if required else "修改密码")
-        self.setFixedSize(400, 300)
         
         # 设置窗口标志 - 移除 WindowStaysOnTopHint 以避免 macOS 问题
         self.setWindowFlags(
@@ -31,30 +30,35 @@ class ChangePasswordDialog(QDialog):
         
         self._setup_ui()
         self._setup_styles()
+
+        # 让控件的实际尺寸决定窗口下限。macOS/Retina 下字体与输入框的
+        # sizeHint 会高于 Windows，固定 300px 高度会导致内容互相覆盖。
+        self.layout().activate()
+        content_height = self.sizeHint().height()
+        self.setMinimumSize(440, max(430, content_height))
+        self.resize(440, max(450, content_height))
         
     def _setup_ui(self):
         """设置用户界面"""
         layout = QVBoxLayout()
-        layout.setSpacing(20)
-        layout.setContentsMargins(40, 30, 40, 30)
+        layout.setSpacing(10)
+        layout.setContentsMargins(32, 24, 32, 24)
         
         # 标题
-        title = QLabel("首次登录必须修改密码" if self.required else "修改密码")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.title_label = QLabel("首次登录必须修改密码" if self.required else "修改密码")
+        self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title_font = QFont()
         title_font.setPointSize(16)
         title_font.setBold(True)
-        title.setFont(title_font)
-        layout.addWidget(title)
+        self.title_label.setFont(title_font)
+        layout.addWidget(self.title_label)
         
         # 用户名显示
+        self.user_label = None
         if self.username:
-            user_label = QLabel(f"当前用户: {self.username}")
-            user_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            layout.addWidget(user_label)
-        
-        # 添加间距
-        layout.addSpacerItem(QSpacerItem(20, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed))
+            self.user_label = QLabel(f"当前用户: {self.username}")
+            self.user_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(self.user_label)
         
         # 旧密码
         self.old_password_label = QLabel("旧密码:")
@@ -111,20 +115,20 @@ class ChangePasswordDialog(QDialog):
                 font-size: 14px;
             }
             QLineEdit {
-                padding: 12px;
+                padding: 9px 10px;
                 border: 1px solid #ddd;
                 border-radius: 4px;
                 font-size: 14px;
                 background-color: white;
                 color: #333;
-                min-height: 25px;
+                min-height: 24px;
             }
             QLineEdit:focus {
                 border: 2px solid #3498db;
                 outline: none;
             }
             QPushButton {
-                padding: 12px 24px;
+                padding: 10px 24px;
                 background-color: #3498db;
                 color: white;
                 border: none;
@@ -132,7 +136,7 @@ class ChangePasswordDialog(QDialog):
                 font-size: 14px;
                 font-weight: bold;
                 min-width: 120px;
-                min-height: 32px;
+                min-height: 30px;
             }
             QPushButton:hover {
                 background-color: #2980b9;

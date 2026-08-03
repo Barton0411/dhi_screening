@@ -8,14 +8,14 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
-import pymysql
 
 class ChangePasswordDialog(QDialog):
     """修改密码对话框"""
     
-    def __init__(self, parent=None, username=None):
+    def __init__(self, parent=None, username=None, auth_service=None):
         super().__init__(parent)
         self.username = username
+        self.auth_service = auth_service or getattr(parent, "auth_service", None)
         self.setWindowTitle("修改密码")
         self.setFixedSize(400, 300)
         
@@ -172,40 +172,13 @@ class ChangePasswordDialog(QDialog):
         old_password = self.old_password_input.text()
         new_password = self.new_password_input.text()
         
-        # 连接阿里云数据库
-        connection = None
-        try:
-            # 阿里云数据库配置
-            ALIYUN_DB_CONFIG = {
-                'host': 'defectgene-new.mysql.polardb.rds.aliyuncs.com',
-                'port': 3306,
-                'user': 'defect_genetic_checking',
-                'password': 'Jaybz@890411',
-                'database': 'bull_library',
-                'charset': 'utf8mb4'
-            }
-            
-            connection = pymysql.connect(**ALIYUN_DB_CONFIG)
-            
-            with connection.cursor() as cursor:
-                # 先验证旧密码
-                sql = "SELECT * FROM `id-pw` WHERE ID=%s AND PW=%s"
-                cursor.execute(sql, (self.username, old_password))
-                
-                if not cursor.fetchone():
-                    QMessageBox.warning(self, "错误", "旧密码不正确")
-                    return
-                
-                # 更新密码
-                sql = "UPDATE `id-pw` SET PW=%s WHERE ID=%s"
-                cursor.execute(sql, (new_password, self.username))
-                connection.commit()
-                
-                QMessageBox.information(self, "成功", "密码修改成功！")
-                self.accept()
-                
-        except Exception as e:
-            QMessageBox.critical(self, "错误", f"修改密码失败: {str(e)}")
-        finally:
-            if connection:
-                connection.close()
+        if not self.auth_service:
+            QMessageBox.critical(self, "修改失败", "登录状态已失效，请重新登录")
+            return
+
+        success, message = self.auth_service.change_password(old_password, new_password)
+        if success:
+            QMessageBox.information(self, "修改成功", "密码修改成功，请在下次登录时使用新密码")
+            self.accept()
+        else:
+            QMessageBox.warning(self, "修改失败", message)

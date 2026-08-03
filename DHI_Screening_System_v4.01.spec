@@ -4,7 +4,7 @@
 
 # 应用信息
 APP_NAME = 'DHI_Screening_System_v4.01'
-APP_VERSION = '4.01'
+APP_VERSION = open('VERSION', encoding='utf-8').read().strip()
 APP_DESCRIPTION = '伊利液奶奶科院 - DHI数据分析与乳房炎监测系统'
 
 # 分析配置

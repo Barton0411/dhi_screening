@@ -1,6 +1,4 @@
-"""
-登录对话框 - 支持记住密码和单设备登录
-"""
+"""安全登录对话框。"""
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -8,8 +6,7 @@ from PyQt6.QtWidgets import (
     QSizePolicy, QGraphicsDropShadowEffect
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont, QIcon, QColor
-from pathlib import Path  
+from PyQt6.QtGui import QFont, QColor
 import logging
 try:
     from .simple_auth_service import SimpleAuthService as AuthService
@@ -35,9 +32,8 @@ class LoginDialog(QDialog):
             auth_service: 认证服务实例
         """
         super().__init__(parent)
-        print("LoginDialog.__init__ 开始")
         self.auth_service = auth_service or AuthService()
-        self.setWindowTitle("用户登录 - DHI筛查助手")
+        self.setWindowTitle("安全登录")
         self.setFixedSize(380, 360)
         
         # 设置窗口标志 - 移除 WindowStaysOnTopHint 以避免 macOS 问题
@@ -46,11 +42,6 @@ class LoginDialog(QDialog):
             Qt.WindowType.WindowTitleHint |
             Qt.WindowType.WindowCloseButtonHint
         )
-        
-        # 设置窗口图标
-        icon_path = Path(__file__).parent.parent / "icon.ico"
-        if icon_path.exists():
-            self.setWindowIcon(QIcon(str(icon_path)))
         
         self._setup_ui()
         self._setup_styles()
@@ -70,7 +61,7 @@ class LoginDialog(QDialog):
         layout.setContentsMargins(35, 30, 35, 25)
         
         # 标题
-        title = QLabel("欢迎使用DHI筛查助手")
+        title = QLabel("安全登录")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title_font = QFont()
         title_font.setPointSize(18)
@@ -123,9 +114,7 @@ class LoginDialog(QDialog):
         
         self.register_button = QPushButton("注册")
         self.register_button.setObjectName("registerBtn")
-        # 使用 lambda 添加调试
-        self.register_button.clicked.connect(lambda: self.on_register_clicked())
-        print(f"注册按钮已创建并连接")
+        self.register_button.clicked.connect(self.on_register_clicked)
         
         button_layout.addWidget(self.login_button)
         button_layout.addWidget(self.register_button)
@@ -323,13 +312,8 @@ class LoginDialog(QDialog):
     def show_register(self):
         """显示注册对话框"""
         try:
-            print("点击了注册按钮")
-            print("开始创建 RegisterDialog...")
             dialog = RegisterDialog(self, self.auth_service)
-            print("RegisterDialog 创建成功")
-            print("准备显示对话框...")
             result = dialog.exec()
-            print(f"对话框返回结果: {result}")
             if result == QDialog.DialogCode.Accepted:
                 # 注册成功后自动填充用户名
                 username = dialog.get_username()
@@ -337,11 +321,9 @@ class LoginDialog(QDialog):
                     self.username_input.setText(username)
                     self.password_input.setFocus()
                     QMessageBox.information(self, "注册成功", "注册成功，请使用您的密码登录")
-        except Exception as e:
-            print(f"显示注册对话框时出错: {e}")
-            import traceback
-            traceback.print_exc()
-            QMessageBox.critical(self, "错误", f"无法打开注册窗口: {str(e)}")
+        except Exception:
+            logging.exception("无法打开注册窗口")
+            QMessageBox.critical(self, "错误", "暂时无法打开注册窗口")
     
     def get_username(self) -> str:
         """获取登录的用户名"""
@@ -349,27 +331,17 @@ class LoginDialog(QDialog):
     
     def on_register_clicked(self):
         """处理注册按钮点击"""
-        print("on_register_clicked 被调用")
         self.show_register()
     
     def show_forgot_password(self):
         """显示忘记密码对话框"""
         try:
-            print("点击了忘记密码链接")
-            print("开始导入 ForgotPasswordDialog...")
             from .forgot_password_dialog import ForgotPasswordDialog
-            print("ForgotPasswordDialog 导入成功")
-            print("开始创建对话框...")
             dialog = ForgotPasswordDialog(self)
-            print("ForgotPasswordDialog 创建成功")
-            print("准备显示对话框...")
             dialog.exec()
-            print("对话框关闭")
-        except Exception as e:
-            print(f"显示忘记密码对话框时出错: {e}")
-            import traceback
-            traceback.print_exc()
-            QMessageBox.critical(self, "错误", f"无法打开忘记密码窗口: {str(e)}")
+        except Exception:
+            logging.exception("无法打开找回密码窗口")
+            QMessageBox.critical(self, "错误", "暂时无法打开找回密码窗口")
 
 # 便捷函数
 def show_login_dialog(parent=None, auth_service=None) -> tuple[bool, str]:

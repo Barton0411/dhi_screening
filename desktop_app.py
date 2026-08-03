@@ -2002,8 +2002,7 @@ class MainWindow(QMainWindow):
         about_action.triggered.connect(self.show_about)
         settings_menu.addAction(about_action)
         
-        # 账号菜单 - 已移除，功能集成到其他位置
-        # account_menu = menubar.addMenu("账号")
+        account_menu = menubar.addMenu("账号")
         
         # # 当前用户显示
         # user_display = self.username
@@ -2018,11 +2017,10 @@ class MainWindow(QMainWindow):
         
         # account_menu.addSeparator()
         
-        # # 修改密码
-        # change_password_action = QAction("修改密码...", self)
-        # change_password_action.setStatusTip("修改当前账号密码")
-        # change_password_action.triggered.connect(self.show_change_password)
-        # account_menu.addAction(change_password_action)
+        change_password_action = QAction("修改密码...", self)
+        change_password_action.setStatusTip("修改当前账号密码")
+        change_password_action.triggered.connect(self.show_change_password)
+        account_menu.addAction(change_password_action)
         
         # # 邀请码管理
         # invite_code_action = QAction("邀请码管理...", self)
@@ -2268,7 +2266,9 @@ class MainWindow(QMainWindow):
     def show_change_password(self):
         """显示修改密码对话框"""
         from auth_module.change_password_dialog import ChangePasswordDialog
-        dialog = ChangePasswordDialog(self, self.username)
+        dialog = ChangePasswordDialog(
+            self, self.username, auth_service=self.auth_service
+        )
         dialog.exec()
     
     def show_invite_code_management(self):
@@ -10399,7 +10399,8 @@ class DHIDesktopApp:
             # 创建QApplication
             self.app = QApplication(sys.argv)
             self.app.setApplicationName("DHI筛查助手")
-            self.app.setApplicationVersion("2.0.0")
+            from version import get_version
+            self.app.setApplicationVersion(get_version())
             self.app.setOrganizationName("DHI")
             self.app.setOrganizationDomain("dhi.com")
             self.app.setStyle('Fusion')  # 使用现代样式
@@ -10411,16 +10412,16 @@ class DHIDesktopApp:
             except:
                 pass
             
-            # 创建简化的认证服务（直接连接阿里云数据库）
+            # 创建 HTTPS 认证服务
             print("正在连接认证服务...")
             self.auth_service = SimpleAuthService()
             
-            # 检查数据库连接
+            # 检查认证服务
             if not self.auth_service.check_server_health():
                 QMessageBox.critical(
                     None,
-                    "数据库连接失败",
-                    "无法连接到数据库。\n请检查网络连接后重试。"
+                    "认证服务不可用",
+                    "暂时无法连接认证服务。\n请检查网络连接后重试。"
                 )
                 return 0
             

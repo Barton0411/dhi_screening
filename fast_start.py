@@ -6,7 +6,15 @@
 
 import sys
 import os
-from PyQt6.QtWidgets import QApplication, QLabel, QWidget, QVBoxLayout, QProgressBar
+from PyQt6.QtWidgets import (
+    QApplication,
+    QLabel,
+    QMessageBox,
+    QProgressBar,
+    QProgressDialog,
+    QVBoxLayout,
+    QWidget,
+)
 from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation
 from PyQt6.QtGui import QPixmap, QFont
 
@@ -54,7 +62,7 @@ class SplashWindow(QWidget):
         main_layout.addWidget(icon_label)
         
         # 标题
-        title_label = QLabel("DHI筛查助手")
+        title_label = QLabel("安全登录")
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title_label.setStyleSheet("""
             color: #2c3e50;
@@ -65,7 +73,8 @@ class SplashWindow(QWidget):
         main_layout.addWidget(title_label)
         
         # 版本信息
-        version_label = QLabel("v4.02")
+        from version import get_version
+        version_label = QLabel(f"v{get_version()}")
         version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         version_label.setStyleSheet("""
             color: #7f8c8d;
@@ -150,8 +159,11 @@ def main():
     splash.show()
     QApplication.processEvents()
     
-    # 保存主窗口引用
+    # 保存窗口和线程引用，避免 Qt 对象提前回收。
     main_window = None
+    update_check_worker = None
+    update_download_worker = None
+    update_progress = None
     
     # 2. 延迟导入并启动主程序
     def load_and_start():
@@ -168,7 +180,8 @@ def main():
             
             # 设置应用程序信息（从DHIDesktopApp.run()复制）
             app.setApplicationName("DHI筛查助手")
-            app.setApplicationVersion("2.0.0")
+            from version import get_version
+            app.setApplicationVersion(get_version())
             app.setOrganizationName("DHI")
             app.setOrganizationDomain("dhi.com")
             app.setStyle('Fusion')
@@ -185,13 +198,13 @@ def main():
             # 创建认证服务
             auth_service = SimpleAuthService()
             
-            # 检查数据库连接
+            # 检查认证服务
             if not auth_service.check_server_health():
                 splash.close()
                 QMessageBox.critical(
                     None,
-                    "数据库连接失败",
-                    "无法连接到数据库。\n请检查网络连接后重试。"
+                    "认证服务不可用",
+                    "暂时无法连接认证服务。\n请检查网络连接后重试。"
                 )
                 app.quit()
                 return
@@ -245,9 +258,91 @@ def main():
             from PyQt6.QtWidgets import QMessageBox
             QMessageBox.critical(None, "启动错误", f"程序启动失败：\n{str(e)}")
             app.quit()
+
+    def start_application_after_update_check():
+        splash.show()
+        splash.update_loading_text("加载核心模块...")
+        QTimer.singleShot(100, load_and_start)
+
+    def handle_update_downloaded(installer_path):
+        nonlocal update_progress
+        from pathlib import Path
+        from update_manager import launch_installer
+
+        if update_progress:
+            update_progress.close()
+        try:
+            launch_installer(Path(installer_path))
+            app.quit()
+        except Exception:
+            QMessageBox.critical(None, "更新失败", "无法启动安装程序，请稍后重试")
+            start_application_after_update_check()
+
+    def handle_update_download_failed(message):
+        nonlocal update_progress
+        if update_progress:
+            update_progress.close()
+        QMessageBox.warning(None, "更新失败", message)
+        start_application_after_update_check()
+
+    def download_update(manifest):
+        nonlocal update_download_worker, update_progress
+        from update_workers import UpdateDownloadWorker
+
+        update_progress = QProgressDialog("正在下载并校验更新包...", None, 0, 100)
+        update_progress.setWindowTitle("软件更新")
+        update_progress.setWindowModality(Qt.WindowModality.ApplicationModal)
+        update_progress.setCancelButton(None)
+        update_progress.setAutoClose(False)
+        update_progress.show()
+
+        update_download_worker = UpdateDownloadWorker(manifest)
+        update_download_worker.progress.connect(update_progress.setValue)
+        update_download_worker.completed.connect(handle_update_downloaded)
+        update_download_worker.failed.connect(handle_update_download_failed)
+        update_download_worker.start()
+
+    def handle_update_result(manifest):
+        if not manifest:
+            start_application_after_update_check()
+            return
+
+        splash.close()
+        changes = "\n".join(f"• {item}" for item in manifest.get("changes", []))
+        prompt = (
+            f"发现新版本 v{manifest['version']}。\n\n"
+            f"{changes or '包含功能改进和安全更新。'}\n\n"
+            "是否现在下载并安装？"
+        )
+        if manifest.get("force_update"):
+            QMessageBox.information(None, "需要更新", prompt.replace("是否现在", "即将"))
+            download_update(manifest)
+            return
+
+        choice = QMessageBox.question(
+            None,
+            "发现新版本",
+            prompt,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if choice == QMessageBox.StandardButton.Yes:
+            download_update(manifest)
+        else:
+            start_application_after_update_check()
+
+    def begin_update_check():
+        nonlocal update_check_worker
+        from update_workers import UpdateCheckWorker
+
+        splash.update_loading_text("检查软件更新...")
+        update_check_worker = UpdateCheckWorker()
+        update_check_worker.completed.connect(handle_update_result)
+        update_check_worker.failed.connect(lambda _message: start_application_after_update_check())
+        update_check_worker.start()
     
     # 3. 使用定时器延迟加载（让启动画面先显示）
-    QTimer.singleShot(500, load_and_start)  # 延迟500ms，确保启动画面显示
+    QTimer.singleShot(300, begin_update_check)
     
     # 4. 运行事件循环
     return app.exec()

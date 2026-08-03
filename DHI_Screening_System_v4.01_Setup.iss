@@ -7,7 +7,9 @@
 
 #define MyAppName "DHI Screening Assistant"
 #define MyAppNameChinese "DHI筛查助手"
-#define MyAppVersion "4.02"
+#ifndef MyAppVersion
+#define MyAppVersion "4.02.25"
+#endif
 #define MyAppPublisher "Yili Liquid Milk Research Institute"
 #define MyAppURL "https://github.com/Barton0411/dhi_screening"
 #define MyAppExeName "DHI_Screening_System.exe"

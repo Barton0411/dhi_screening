@@ -1,6 +1,6 @@
 app:
   name: "DHI筛查助手"
-  version: "4.02"
+  version: "4.02.25"
   debug: false
 
 upload:
@@ -20,4 +20,4 @@ export:
 
 logging:
   level: "INFO"
-  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s" 
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

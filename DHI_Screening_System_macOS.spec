@@ -4,7 +4,7 @@
 
 # 应用信息
 APP_NAME = 'DHI筛查助手'
-APP_VERSION = '4.02'
+APP_VERSION = open('VERSION', encoding='utf-8').read().strip()
 APP_DESCRIPTION = '伊利液奶奶科院 - DHI数据分析与乳房炎监测系统'
 
 # 分析配置
@@ -14,6 +14,7 @@ a = Analysis(
     binaries=[],
     datas=[
         ('config.yaml', '.'),
+        ('VERSION', '.'),
         ('rules.yaml', '.'), 
         ('whg3r-qi1nv-001.ico', '.'),
         ('whg3r-qi1nv-001.icns', '.'),
@@ -90,7 +91,6 @@ a = Analysis(
         'pyqtgraph.exporters',
         'pydantic',
         'dateutil',
-        'pymysql',
         'requests',
         'cryptography',
         'tabulate',

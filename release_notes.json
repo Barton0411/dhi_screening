@@ -1,0 +1,9 @@
+{
+  "force_update": false,
+  "changes": [
+    "账号登录、注册和修改密码统一改用 HTTPS 认证服务，桌面端不再连接生产数据库",
+    "保留已有账号，并继续支持邀请码注册申请",
+    "新增 Windows 和 macOS 客户端自动检查更新、SHA-256 校验和安装提示",
+    "GitHub Release 与阿里云 OSS 同步发布并保留版本备份"
+  ]
+}

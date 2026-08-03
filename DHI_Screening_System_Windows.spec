@@ -4,7 +4,7 @@
 
 # 应用信息 - 使用英文名避免Windows编码问题
 APP_NAME = 'DHI_Screening_System'
-APP_VERSION = '4.02'
+APP_VERSION = open('VERSION', encoding='utf-8').read().strip()
 APP_DESCRIPTION = 'DHI Data Analysis and Mastitis Monitoring System'
 
 # 分析配置
@@ -14,6 +14,7 @@ a = Analysis(
     binaries=[],
     datas=[
         ('config.yaml', '.'),
+        ('VERSION', '.'),
         ('rules.yaml', '.'), 
         ('whg3r-qi1nv-001.ico', '.'),
         ('README.md', '.'),
@@ -89,7 +90,6 @@ a = Analysis(
         'pyqtgraph.exporters',
         'pydantic',
         'dateutil',
-        'pymysql',
         'requests',
         'cryptography',
         'tabulate',

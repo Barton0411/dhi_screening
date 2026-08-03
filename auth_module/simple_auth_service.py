@@ -1,339 +1,228 @@
-"""
-简化的认证服务 - 直接连接阿里云数据库，使用数据库实现单设备登录
+"""HTTPS 认证客户端。
+
+桌面应用只调用受控认证 API，不持有或连接生产数据库凭据。
 """
 
-import pymysql
-import uuid
 import json
-import os
 import logging
+import os
 from pathlib import Path
-from typing import Optional, Tuple, Dict
-from datetime import datetime, timedelta
-from cryptography.fernet import Fernet
+from typing import Dict, Optional, Tuple
+from urllib.parse import urlparse
 
-# 阿里云数据库配置
-ALIYUN_DB_CONFIG = {
-    'host': 'defectgene-new.mysql.polardb.rds.aliyuncs.com',
-    'port': 3306,
-    'user': 'defect_genetic_checking',
-    'password': 'Jaybz@890411',
-    'database': 'bull_library',
-    'charset': 'utf8mb4'
-}
+import requests
+from cryptography.fernet import Fernet, InvalidToken
+
+
+DEFAULT_AUTH_API_BASE_URL = "https://api.genepop.com"
+ALLOWED_AUTH_HOSTS = {"api.genepop.com"}
+REQUEST_TIMEOUT = (5, 15)
+
 
 class SimpleAuthService:
-    """简化的认证服务 - 直接使用阿里云数据库"""
-    
-    def __init__(self):
-        """初始化认证服务"""
-        self.device_id = self._get_or_create_device_id()
-        self.username = None
-        self.last_heartbeat = None
-        self.session_id = None
-        
-        # 用于本地凭证加密
+    """保持旧界面调用契约的 HTTPS 认证适配器。"""
+
+    def __init__(self, base_url: Optional[str] = None):
+        self.base_url = self._validate_base_url(
+            base_url or os.environ.get("PROTEIN_SCREENING_AUTH_API_URL", DEFAULT_AUTH_API_BASE_URL)
+        )
+        self.username: Optional[str] = None
+        self.user_name: Optional[str] = None
+        self.token: Optional[str] = None
+        self.session_id: Optional[str] = None
+        self.session = requests.Session()
+        self.session.headers.update(
+            {
+                "Accept": "application/json",
+                "User-Agent": "dhi-screening-desktop",
+            }
+        )
         self.cipher_suite = self._init_cipher()
-        
+
+    @staticmethod
+    def _validate_base_url(value: str) -> str:
+        parsed = urlparse(value.rstrip("/"))
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname not in ALLOWED_AUTH_HOSTS
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("认证服务地址无效")
+        return value.rstrip("/")
+
     def _init_cipher(self) -> Fernet:
-        """初始化加密器"""
         key_file = Path.home() / ".protein_screening" / "key.key"
-        key_file.parent.mkdir(exist_ok=True)
-        
+        key_file.parent.mkdir(parents=True, exist_ok=True)
         if key_file.exists():
             key = key_file.read_bytes()
         else:
             key = Fernet.generate_key()
             key_file.write_bytes(key)
-            
-        return Fernet(key)
-    
-    def _get_or_create_device_id(self) -> str:
-        """获取或创建设备ID"""
-        device_file = Path.home() / ".protein_screening" / "device_id"
-        device_file.parent.mkdir(exist_ok=True)
-        
-        if device_file.exists():
-            return device_file.read_text().strip()
-        else:
-            device_id = str(uuid.uuid4())
-            device_file.write_text(device_id)
-            return device_id
-    
-    def _get_db_connection(self):
-        """获取数据库连接"""
-        return pymysql.connect(**ALIYUN_DB_CONFIG)
-    
-    def register(self, employee_id: str, password: str, invite_code: str, name: str) -> Tuple[bool, str]:
-        """注册新用户"""
-        connection = None
-        try:
-            connection = self._get_db_connection()
-            
-            with connection.cursor() as cursor:
-                # 检查用户是否已存在
-                sql = "SELECT ID FROM `id-pw` WHERE ID=%s"
-                cursor.execute(sql, (employee_id,))
-                if cursor.fetchone():
-                    return False, "用户名已存在"
-                
-                # 检查邀请码
-                sql = """
-                    SELECT code, status, max_uses, current_uses, expire_time 
-                    FROM invitation_codes 
-                    WHERE code = %s
-                """
-                cursor.execute(sql, (invite_code,))
-                invite = cursor.fetchone()
-                
-                if not invite:
-                    return False, "邀请码不存在"
-                
-                # 检查状态
-                if invite[1] != 1:  # status
-                    return False, "邀请码已失效"
-                
-                # 检查过期时间
-                if invite[4] and datetime.now() > invite[4]:
-                    return False, "邀请码已过期"
-                
-                # 检查使用次数
-                if invite[3] >= invite[2]:  # current_uses >= max_uses
-                    return False, "邀请码使用次数已达上限"
-                
-                # 创建用户
-                sql = "INSERT INTO `id-pw` (ID, PW, name) VALUES (%s, %s, %s)"
-                cursor.execute(sql, (employee_id, password, name))
-                
-                # 更新邀请码使用次数
-                sql = """
-                    UPDATE invitation_codes 
-                    SET current_uses = current_uses + 1
-                    WHERE code = %s
-                """
-                cursor.execute(sql, (invite_code,))
-                
-                connection.commit()
-                return True, "注册成功"
-                
-        except Exception as e:
-            logging.error(f"注册失败: {e}")
-            return False, f"注册失败: {str(e)}"
-        finally:
-            if connection:
-                connection.close()
-    
-    def login(self, username: str, password: str, force: bool = False) -> Tuple[bool, str, Optional[Dict]]:
-        """用户登录"""
-        connection = None
-        try:
-            connection = self._get_db_connection()
-            
-            with connection.cursor() as cursor:
-                # 验证用户名密码
-                sql = "SELECT * FROM `id-pw` WHERE ID=%s AND PW=%s"
-                cursor.execute(sql, (username, password))
-                if not cursor.fetchone():
-                    return False, "用户名或密码错误", None
-                
-                # 使用现有的 user_sessions 表存储登录状态
-                
-                # 检查当前用户的活跃登录状态
-                sql = """
-                    SELECT id, token_jti, last_active_time, user_agent 
-                    FROM user_sessions 
-                    WHERE user_id=%s AND is_active=1
-                    ORDER BY last_active_time DESC
-                    LIMIT 1
-                """
-                cursor.execute(sql, (username,))
-                session = cursor.fetchone()
-                
-                if session:
-                    session_id = session[0]
-                    last_active = session[2]
-                    other_device = session[3] or "unknown"
-                    
-                    # 检查是否是同一设备（通过 user_agent 判断）
-                    current_device = f"DHI-Desktop-{self.device_id[:8]}"
-                    if other_device == current_device:
-                        # 同一设备，更新活跃时间
-                        sql = "UPDATE user_sessions SET last_active_time=NOW() WHERE id=%s"
-                        cursor.execute(sql, (session_id,))
-                        connection.commit()
-                        self.username = username
-                        self.session_id = session_id
-                        return True, "登录成功", None
-                    
-                    # 检查其他设备是否还在活跃（5分钟内有活动）
-                    if last_active and (datetime.now() - last_active) < timedelta(minutes=5):
-                        if not force:
-                            return False, "该账号已在其他设备登录", {"need_force_login": True}
-                
-                # 如果强制登录，先将其他会话设为非活跃
-                if force and session:
-                    sql = "UPDATE user_sessions SET is_active=0, logout_time=NOW() WHERE user_id=%s AND is_active=1"
-                    cursor.execute(sql, (username,))
-                
-                # 创建新会话
-                import uuid
-                token_jti = str(uuid.uuid4())
-                current_device = f"DHI-Desktop-{self.device_id[:8]}"
-                
-                sql = """
-                    INSERT INTO user_sessions 
-                    (user_id, token_jti, login_time, last_active_time, user_agent, is_active) 
-                    VALUES (%s, %s, NOW(), NOW(), %s, 1)
-                """
-                cursor.execute(sql, (username, token_jti, current_device))
-                connection.commit()
-                
-                # 获取新创建的会话ID
-                self.session_id = cursor.lastrowid
-                
-                self.username = username
-                self.last_heartbeat = datetime.now()
-                return True, "登录成功", None
-                
-        except Exception as e:
-            logging.error(f"登录失败: {e}")
-            return False, f"登录失败: {str(e)}", None
-        finally:
-            if connection:
-                connection.close()
-    
-    def heartbeat(self) -> bool:
-        """发送心跳"""
-        if not self.username or not self.session_id:
-            return False
-            
-        connection = None
-        try:
-            connection = self._get_db_connection()
-            
-            with connection.cursor() as cursor:
-                # 检查会话是否仍然活跃
-                sql = "SELECT is_active FROM user_sessions WHERE id=%s"
-                cursor.execute(sql, (self.session_id,))
-                result = cursor.fetchone()
-                
-                if not result or result[0] != 1:
-                    # 会话已失效（被其他设备踢出）
-                    self.username = None
-                    self.session_id = None
-                    return False
-                
-                # 更新最后活跃时间
-                sql = "UPDATE user_sessions SET last_active_time=NOW() WHERE id=%s"
-                cursor.execute(sql, (self.session_id,))
-                connection.commit()
-                
-                self.last_heartbeat = datetime.now()
-                return True
-                
-        except Exception as e:
-            logging.error(f"心跳失败: {e}")
-            return False
-        finally:
-            if connection:
-                connection.close()
-    
-    def logout(self):
-        """登出"""
-        if not self.username or not self.session_id:
-            return
-            
-        connection = None
-        try:
-            connection = self._get_db_connection()
-            
-            with connection.cursor() as cursor:
-                # 将会话标记为非活跃
-                sql = "UPDATE user_sessions SET is_active=0, logout_time=NOW() WHERE id=%s"
-                cursor.execute(sql, (self.session_id,))
-                connection.commit()
-                
-        except Exception as e:
-            logging.error(f"登出失败: {e}")
-        finally:
-            if connection:
-                connection.close()
-            self.username = None
-            self.session_id = None
-    
-    def save_credentials(self, username: str, password: str, remember: bool = True):
-        """保存登录凭证"""
-        cred_file = Path.home() / ".protein_screening" / "credentials.enc"
-        
-        if remember:
-            data = {
-                "username": username,
-                "password": password,
-                "remember": True
-            }
-            encrypted = self.cipher_suite.encrypt(json.dumps(data).encode())
-            cred_file.write_bytes(encrypted)
-        else:
-            # 只保存用户名
-            data = {
-                "username": username,
-                "password": "",
-                "remember": False
-            }
-            encrypted = self.cipher_suite.encrypt(json.dumps(data).encode())
-            cred_file.write_bytes(encrypted)
-    
-    def load_credentials(self) -> Optional[Dict]:
-        """加载保存的凭证"""
-        cred_file = Path.home() / ".protein_screening" / "credentials.enc"
-        
-        if cred_file.exists():
             try:
-                encrypted = cred_file.read_bytes()
-                decrypted = self.cipher_suite.decrypt(encrypted)
-                return json.loads(decrypted.decode())
-            except Exception as e:
-                logging.error(f"加载凭证失败: {str(e)}")
-                return None
-        return None
-    
-    def clear_credentials(self):
-        """清除保存的凭证"""
-        cred_file = Path.home() / ".protein_screening" / "credentials.enc"
-        if cred_file.exists():
-            cred_file.unlink()
-    
-    def check_server_health(self) -> bool:
-        """检查数据库连接（兼容旧接口）"""
+                key_file.chmod(0o600)
+            except OSError:
+                pass
+        return Fernet(key)
+
+    def _request(
+        self,
+        method: str,
+        endpoint: str,
+        payload: Optional[Dict] = None,
+        authenticated: bool = False,
+    ) -> Tuple[bool, Dict]:
+        headers = {"Content-Type": "application/json"}
+        if authenticated:
+            if not self.token:
+                return False, {"message": "登录状态已失效，请重新登录"}
+            headers["Authorization"] = f"Bearer {self.token}"
+
         try:
-            connection = self._get_db_connection()
-            connection.close()
-            return True
-        except:
+            response = self.session.request(
+                method,
+                f"{self.base_url}{endpoint}",
+                json=payload,
+                headers=headers,
+                timeout=REQUEST_TIMEOUT,
+            )
+            data = response.json()
+            if not isinstance(data, dict):
+                raise ValueError("invalid response")
+            return response.ok, data
+        except (requests.RequestException, ValueError):
+            logging.warning("认证服务请求失败: endpoint=%s", endpoint)
+            return False, {"message": "认证服务暂时不可用，请稍后重试"}
+
+    def register(
+        self, employee_id: str, password: str, invite_code: str, name: str
+    ) -> Tuple[bool, str]:
+        _, data = self._request(
+            "POST",
+            "/api/auth/register",
+            {
+                "employee_id": employee_id,
+                "password": password,
+                "invite_code": invite_code,
+                "name": name,
+            },
+        )
+        allowed = {
+            "注册成功",
+            "用户名已存在",
+            "邀请码不存在",
+            "邀请码已失效",
+            "邀请码已过期",
+            "邀请码使用次数已达上限",
+        }
+        message = data.get("message")
+        if data.get("success") is True:
+            return True, "注册成功"
+        return False, message if message in allowed else "注册暂时失败，请稍后重试"
+
+    def login(
+        self, username: str, password: str, force: bool = False
+    ) -> Tuple[bool, str, Optional[Dict]]:
+        del force  # HTTPS API 不允许客户端操纵其他设备的会话。
+        _, data = self._request(
+            "POST",
+            "/api/auth/login",
+            {"username": username, "password": password},
+        )
+        response_data = data.get("data") if isinstance(data.get("data"), dict) else {}
+        token = response_data.get("token")
+        if data.get("success") is True and isinstance(token, str) and token:
+            self.username = username
+            self.user_name = response_data.get("name")
+            self.token = token
+            self.session_id = token
+            return True, "登录成功", None
+
+        self.logout()
+        if data.get("message") == "用户名或密码错误":
+            return False, "账号或密码错误", None
+        return False, "认证服务暂时不可用，请稍后重试", None
+
+    def change_password(self, current_password: str, new_password: str) -> Tuple[bool, str]:
+        _, data = self._request(
+            "POST",
+            "/api/auth/change-password",
+            {
+                "current_password": current_password,
+                "new_password": new_password,
+            },
+            authenticated=True,
+        )
+        allowed = {
+            "密码修改成功",
+            "当前密码错误",
+            "新密码不能与当前密码相同",
+            "未登录，请先登录",
+        }
+        message = data.get("message")
+        if data.get("success") is True:
+            self.clear_credentials()
+            return True, "密码修改成功"
+        return False, message if message in allowed else "密码修改失败，请稍后重试"
+
+    def heartbeat(self) -> bool:
+        if not self.token:
             return False
-    
-    def get_user_name(self) -> Optional[str]:
-        """获取当前用户的姓名"""
-        if not self.username:
-            return None
-            
-        connection = None
+        _, data = self._request("POST", "/api/auth/verify", authenticated=True)
+        if data.get("success") is True:
+            return True
+        self.logout()
+        return False
+
+    def logout(self):
+        self.username = None
+        self.user_name = None
+        self.token = None
+        self.session_id = None
+
+    def save_credentials(self, username: str, password: str, remember: bool = True):
+        credential_file = Path.home() / ".protein_screening" / "credentials.enc"
+        data = {
+            "username": username,
+            "password": password if remember else "",
+            "remember": remember,
+        }
+        credential_file.write_bytes(
+            self.cipher_suite.encrypt(json.dumps(data).encode("utf-8"))
+        )
         try:
-            connection = self._get_db_connection()
-            
-            with connection.cursor() as cursor:
-                # 查询用户姓名
-                sql = "SELECT name FROM `id-pw` WHERE ID=%s"
-                cursor.execute(sql, (self.username,))
-                result = cursor.fetchone()
-                
-                if result and result[0]:
-                    return result[0]
-                return None
-                
-        except Exception as e:
-            logging.error(f"获取用户姓名失败: {e}")
+            credential_file.chmod(0o600)
+        except OSError:
+            pass
+
+    def load_credentials(self) -> Optional[Dict]:
+        credential_file = Path.home() / ".protein_screening" / "credentials.enc"
+        if not credential_file.exists():
             return None
-        finally:
-            if connection:
-                connection.close()
+        try:
+            decrypted = self.cipher_suite.decrypt(credential_file.read_bytes())
+            data = json.loads(decrypted.decode("utf-8"))
+            return data if isinstance(data, dict) else None
+        except (OSError, ValueError, json.JSONDecodeError, InvalidToken):
+            logging.warning("本地登录信息无法读取")
+            return None
+
+    def clear_credentials(self):
+        credential_file = Path.home() / ".protein_screening" / "credentials.enc"
+        credential_file.unlink(missing_ok=True)
+
+    def check_server_health(self) -> bool:
+        try:
+            response = self.session.get(
+                f"{self.base_url}/health",
+                headers={"Accept": "application/json"},
+                timeout=REQUEST_TIMEOUT,
+            )
+            return response.ok
+        except requests.RequestException:
+            return False
+
+    def get_user_name(self) -> Optional[str]:
+        return self.user_name

@@ -1,0 +1,147 @@
+name: Build and Release DHI Screening
+
+on:
+  pull_request:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Validate version
+        shell: bash
+        run: |
+          version="$(tr -d '\r\n' < VERSION)"
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "Tag $GITHUB_REF_NAME does not match VERSION $version" >&2
+            exit 1
+          fi
+          echo "APP_VERSION=$version" >> "$GITHUB_ENV"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+      - name: Create Windows version metadata
+        shell: pwsh
+        run: |
+          $parts = $env:APP_VERSION.Split('.') | ForEach-Object { [int]$_ }
+          while ($parts.Count -lt 4) { $parts += 0 }
+          $tuple = ($parts[0..3] -join ', ')
+          @"
+          VSVersionInfo(
+            ffi=FixedFileInfo(filevers=($tuple), prodvers=($tuple), mask=0x3f, flags=0x0, OS=0x40004, fileType=0x1, subtype=0x0, date=(0, 0)),
+            kids=[StringFileInfo([StringTable(u'040904B0', [
+              StringStruct(u'FileDescription', u'DHI Screening Assistant'),
+              StringStruct(u'FileVersion', u'$env:APP_VERSION'),
+              StringStruct(u'ProductName', u'DHI Screening Assistant'),
+              StringStruct(u'ProductVersion', u'$env:APP_VERSION')
+            ])]), VarFileInfo([VarStruct(u'Translation', [1033, 1200])])]
+          )
+          "@ | Out-File version_info.txt -Encoding ASCII
+      - name: Build Windows application
+        run: pyinstaller --clean DHI_Screening_System_Windows.spec
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { $iscc = "C:\Program Files\Inno Setup 6\ISCC.exe" }
+          & $iscc "/DMyAppVersion=$env:APP_VERSION" DHI_Screening_System_v4.01_Setup.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          Move-Item "installer\DHI_Screening_System_v${env:APP_VERSION}_Setup.exe" "release\DHI-Screening-v${env:APP_VERSION}-Windows-Setup.exe"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: release/*.exe
+          if-no-files-found: error
+
+  build-macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Validate version
+        shell: bash
+        run: |
+          version="$(tr -d '\r\n' < VERSION)"
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "Tag $GITHUB_REF_NAME does not match VERSION $version" >&2
+            exit 1
+          fi
+          echo "APP_VERSION=$version" >> "$GITHUB_ENV"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+          brew install create-dmg
+      - name: Build macOS application
+        run: pyinstaller --clean DHI_Screening_System_macOS.spec
+      - name: Build macOS DMG
+        run: |
+          mkdir -p dmg_temp release
+          cp -R "dist/DHI筛查助手.app" dmg_temp/
+          create-dmg \
+            --volname "DHI筛查助手 $APP_VERSION" \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --icon "DHI筛查助手.app" 175 190 \
+            --hide-extension "DHI筛查助手.app" \
+            --app-drop-link 425 190 \
+            "release/DHI-Screening-v${APP_VERSION}-macOS.dmg" \
+            dmg_temp/ || hdiutil create -volname "DHI筛查助手" -srcfolder dmg_temp -ov -format UDZO "release/DHI-Screening-v${APP_VERSION}-macOS.dmg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-installer
+          path: release/*.dmg
+          if-no-files-found: error
+
+  publish:
+    if: github.ref_type == 'tag'
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@v4
+        with:
+          path: downloaded
+      - name: Prepare release files
+        run: |
+          mkdir -p release
+          cp downloaded/windows-installer/*.exe release/
+          cp downloaded/macos-installer/*.dmg release/
+          python scripts/generate_update_manifest.py \
+            --windows release/DHI-Screening-v$(cat VERSION)-Windows-Setup.exe \
+            --macos release/DHI-Screening-v$(cat VERSION)-macOS.dmg \
+            --output-dir release
+      - name: Publish immutable release and latest manifest to OSS
+        env:
+          OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+        run: |
+          pip install oss2
+          python scripts/publish_oss.py --release-dir release
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            release/*.exe release/*.dmg release/version.json \
+            release/SHA256SUMS.txt \
+            --title "DHI筛查助手 $GITHUB_REF_NAME" \
+            --notes-file release/RELEASE_NOTES.md

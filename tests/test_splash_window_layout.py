@@ -5,7 +5,11 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtWidgets import QApplication, QLabel
 
-from fast_start import SplashWindow
+from fast_start import (
+    SplashWindow,
+    keep_process_alive_during_startup,
+    restore_normal_window_shutdown,
+)
 
 
 class SplashWindowLayoutTests(unittest.TestCase):
@@ -39,6 +43,13 @@ class SplashWindowLayoutTests(unittest.TestCase):
             previous_bottom = bottom_right.y()
 
         splash.close()
+
+    def test_update_window_transitions_do_not_quit_application(self):
+        keep_process_alive_during_startup(self.app)
+        self.assertFalse(self.app.quitOnLastWindowClosed())
+
+        restore_normal_window_shutdown(self.app)
+        self.assertTrue(self.app.quitOnLastWindowClosed())
 
 
 if __name__ == "__main__":

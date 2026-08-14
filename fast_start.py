@@ -147,10 +147,21 @@ class SplashWindow(QWidget):
         QApplication.processEvents()
 
 
+def keep_process_alive_during_startup(app: QApplication) -> None:
+    """启动、更新和登录切换窗口期间，不因暂时没有可见窗口而退出。"""
+    app.setQuitOnLastWindowClosed(False)
+
+
+def restore_normal_window_shutdown(app: QApplication) -> None:
+    """主窗口显示后恢复关闭最后窗口即退出的桌面应用行为。"""
+    app.setQuitOnLastWindowClosed(True)
+
+
 def main():
     """快速启动主函数"""
     # 1. 创建应用程序和启动画面（很快）
     app = QApplication(sys.argv)
+    keep_process_alive_during_startup(app)
     
     # 设置应用程序图标
     try:
@@ -252,6 +263,7 @@ def main():
                 # 创建主窗口
                 main_window = MainWindow(username=username, auth_service=auth_service)
                 main_window.showMaximized()
+                restore_normal_window_shutdown(app)
                 
                 # 主窗口创建成功，继续运行事件循环
             else:
@@ -340,7 +352,7 @@ def main():
             start_application_after_update_check()
             return
 
-        splash.close()
+        splash.hide()
         changes = "\n".join(f"• {item}" for item in manifest.get("changes", []))
         release_summary = (
             f"发现新版本 v{manifest['version']}。\n\n"
@@ -368,7 +380,7 @@ def main():
             start_application_after_update_check()
 
     def handle_update_check_failed(_message):
-        splash.close()
+        splash.hide()
         choice = QMessageBox.warning(
             None,
             "无法检查更新",

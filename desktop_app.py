@@ -29,7 +29,7 @@ from PyQt6.QtWidgets import (
     QSizePolicy, QProgressDialog
 )
 from PyQt6.QtCore import QThread, pyqtSignal, QDate, Qt, QTimer, QSettings, QPropertyAnimation, QEasingCurve, pyqtProperty, QDateTime
-from PyQt6.QtGui import QIcon, QFont, QPixmap, QColor, QAction
+from PyQt6.QtGui import QIcon, QFont, QPixmap, QColor, QAction, QPalette
 import yaml
 
 # 导入我们的数据处理模块
@@ -73,496 +73,331 @@ except Exception as e:
 
 
 class DisplaySettingsDialog(QDialog):
-    """显示设置对话框"""
-    
+    """紧凑、可预览且不易破坏布局的显示设置。"""
+
+    PRESETS = {
+        "compact": (90, 11),
+        "recommended": (100, 12),
+        "comfortable": (110, 13),
+    }
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("界面显示设置")
         self.setModal(True)
-        self.resize(450, 600)
-        
-        # 加载当前设置
+        self.setMinimumSize(760, 570)
+        self.resize(800, 590)
+
         self.settings = QSettings("DHI", "ProteinScreening")
-        current_scale = self.settings.value("display_scale", 100, type=int)
-        current_font_color = self.settings.value("font_color", "#000000", type=str)
-        current_bg_color = self.settings.value("background_color", "#ffffff", type=str)
-        current_font_family = self.settings.value("font_family", "Microsoft YaHei", type=str)
-        current_font_size = self.settings.value("font_size", 12, type=int)
-        current_font_bold = self.settings.value("font_bold", False, type=bool)
-        current_font_italic = self.settings.value("font_italic", False, type=bool)
-        current_font_underline = self.settings.value("font_underline", False, type=bool)
-        current_use_system_theme = self.settings.value("use_system_theme", True, type=bool)
-        
-        self.init_ui(current_scale, current_font_color, current_bg_color, 
-                    current_font_family, current_font_size, current_font_bold, 
-                    current_font_italic, current_font_underline, current_use_system_theme)
-    
-    def init_ui(self, current_scale, current_font_color, current_bg_color,
-                current_font_family, current_font_size, current_font_bold,
-                current_font_italic, current_font_underline, current_use_system_theme):
-        """初始化界面"""
+        self.current_scale = min(max(
+            self.settings.value("display_scale", 100, type=int), 90
+        ), 125)
+        self.current_font_size = min(max(
+            self.settings.value("font_size", 12, type=int), 10
+        ), 16)
+        self.current_font_family = self.settings.value(
+            "font_family", QApplication.font().family(), type=str
+        )
+        self.current_font_bold = self.settings.value(
+            "font_bold", False, type=bool
+        )
+        legacy_system_theme = self.settings.value(
+            "use_system_theme", True, type=bool
+        )
+        self.current_theme_mode = self.settings.value(
+            "theme_mode", "system" if legacy_system_theme else "light", type=str
+        )
+        if self.current_theme_mode not in {"system", "light", "dark"}:
+            self.current_theme_mode = "system"
+        self._updating_controls = False
+        self.init_ui()
+
+    def _card(self, title: str, description: str = ""):
+        card = QFrame()
+        card.setObjectName("settingsCard")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(18, 16, 18, 16)
+        card_layout.setSpacing(10)
+        title_label = QLabel(title)
+        title_label.setObjectName("cardTitle")
+        card_layout.addWidget(title_label)
+        if description:
+            description_label = QLabel(description)
+            description_label.setObjectName("cardDescription")
+            description_label.setWordWrap(True)
+            card_layout.addWidget(description_label)
+        return card, card_layout
+
+    def init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setSpacing(15)
-        layout.setContentsMargins(20, 20, 20, 20)
-        
-        # 标题
-        title_label = QLabel("界面显示设置")
-        title_label.setStyleSheet("font-weight: bold; color: #333;")
-        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(title_label)
-        
-        # 创建滚动区域
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        
-        scroll_widget = QWidget()
-        scroll_layout = QVBoxLayout(scroll_widget)
-        scroll_layout.setSpacing(15)
-        
-        # 缩放设置分组
-        scale_group = QGroupBox("显示缩放")
-        scale_group.setStyleSheet("QGroupBox { font-weight: bold; color: #333; }")
-        scale_layout = QVBoxLayout(scale_group)
-        
-        # 缩放滑块
-        scale_container = QWidget()
-        scale_container_layout = QHBoxLayout(scale_container)
-        scale_container_layout.setContentsMargins(0, 0, 0, 0)
-        
-        scale_container_layout.addWidget(QLabel("50%"))
-        
-        self.scale_slider = QSlider(Qt.Orientation.Horizontal)
-        self.scale_slider.setRange(50, 200)
-        self.scale_slider.setValue(current_scale)
-        self.scale_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self.scale_slider.setTickInterval(25)
-        self.scale_slider.valueChanged.connect(self.update_scale_label)
-        scale_container_layout.addWidget(self.scale_slider)
-        
-        scale_container_layout.addWidget(QLabel("200%"))
-        
-        scale_layout.addWidget(scale_container)
-        
-        # 当前缩放显示
-        self.scale_label = QLabel(f"当前缩放: {current_scale}%")
-        self.scale_label.setStyleSheet("color: #666; font-size: 14px;")
-        self.scale_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        scale_layout.addWidget(self.scale_label)
-        
-        scroll_layout.addWidget(scale_group)
-        
-        # 字体设置分组
-        font_group = QGroupBox("字体设置")
-        font_group.setStyleSheet("QGroupBox { font-weight: bold; color: #333; }")
-        font_layout = QVBoxLayout(font_group)
-        
-        # 字体系列设置
-        font_family_container = QWidget()
-        font_family_layout = QHBoxLayout(font_family_container)
-        font_family_layout.setContentsMargins(0, 0, 0, 0)
-        
-        font_family_label = QLabel("字体类型:")
-        font_family_label.setStyleSheet("color: #333; min-width: 80px;")
-        font_family_layout.addWidget(font_family_label)
-        
+        layout.setSpacing(14)
+        layout.setContentsMargins(24, 22, 24, 20)
+
+        heading = QLabel("界面显示设置")
+        heading.setObjectName("dialogTitle")
+        layout.addWidget(heading)
+        subtitle = QLabel("选择一个稳定的显示方案。缩放仅提供经过验证的档位，避免控件错位。")
+        subtitle.setObjectName("dialogSubtitle")
+        layout.addWidget(subtitle)
+
+        content = QHBoxLayout()
+        content.setSpacing(14)
+
+        controls = QVBoxLayout()
+        controls.setSpacing(12)
+
+        display_card, display_layout = self._card(
+            "显示方案", "推荐方案适合大多数屏幕；紧凑方案可显示更多内容。"
+        )
+        display_card.setMinimumHeight(175)
+        display_form = QFormLayout()
+        display_form.setHorizontalSpacing(14)
+        display_form.setVerticalSpacing(10)
+        display_form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
+
+        self.preset_combo = QComboBox()
+        self.preset_combo.addItem("紧凑", "compact")
+        self.preset_combo.addItem("推荐", "recommended")
+        self.preset_combo.addItem("舒适", "comfortable")
+        self.preset_combo.addItem("自定义", "custom")
+        display_form.addRow("预设", self.preset_combo)
+
+        self.scale_combo = QComboBox()
+        for value in (90, 100, 110, 125):
+            self.scale_combo.addItem(f"{value}%", value)
+        self.set_scale(self.current_scale)
+        display_form.addRow("界面缩放", self.scale_combo)
+
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItem("跟随系统", "system")
+        self.theme_combo.addItem("浅色", "light")
+        self.theme_combo.addItem("深色", "dark")
+        theme_index = self.theme_combo.findData(self.current_theme_mode)
+        self.theme_combo.setCurrentIndex(max(theme_index, 0))
+        display_form.addRow("界面主题", self.theme_combo)
+        display_layout.addLayout(display_form)
+        controls.addWidget(display_card)
+
+        font_card, font_layout = self._card(
+            "文字", "字体大小限制在可用范围内，不再允许斜体和下划线作用于全部控件。"
+        )
+        font_card.setMinimumHeight(220)
+        font_form = QFormLayout()
+        font_form.setHorizontalSpacing(14)
+        font_form.setVerticalSpacing(10)
         self.font_family_combo = QComboBox()
-        # 添加常用中文字体
         fonts = [
-            "Microsoft YaHei", "SimHei", "SimSun", "KaiTi", "FangSong",
-            "Arial", "Times New Roman", "Calibri", "Consolas", "Verdana"
+            QApplication.font().family(), "PingFang SC", "Microsoft YaHei",
+            "Noto Sans CJK SC", "Arial"
         ]
-        self.font_family_combo.addItems(fonts)
-        self.font_family_combo.setCurrentText(current_font_family)
-        self.font_family_combo.currentTextChanged.connect(self.update_preview)
-        font_family_layout.addWidget(self.font_family_combo)
-        
-        font_layout.addWidget(font_family_container)
-        
-        # 字体大小设置
-        font_size_container = QWidget()
-        font_size_layout = QHBoxLayout(font_size_container)
-        font_size_layout.setContentsMargins(0, 0, 0, 0)
-        
-        font_size_label = QLabel("字体大小:")
-        font_size_label.setStyleSheet("color: #333; min-width: 80px;")
-        font_size_layout.addWidget(font_size_label)
-        
+        for font in dict.fromkeys(fonts):
+            self.font_family_combo.addItem(font)
+        if self.current_font_family not in fonts:
+            self.font_family_combo.addItem(self.current_font_family)
+        self.font_family_combo.setCurrentText(self.current_font_family)
+        font_form.addRow("字体", self.font_family_combo)
+
         self.font_size_spin = QSpinBox()
-        self.font_size_spin.setRange(8, 32)
-        self.font_size_spin.setValue(current_font_size)
+        self.font_size_spin.setRange(10, 16)
+        self.font_size_spin.setValue(self.current_font_size)
         self.font_size_spin.setSuffix(" px")
-        self.font_size_spin.valueChanged.connect(self.update_preview)
-        font_size_layout.addWidget(self.font_size_spin)
-        
-        font_size_layout.addStretch()
-        
-        font_layout.addWidget(font_size_container)
-        
-        # 字体样式设置
-        font_style_container = QWidget()
-        font_style_layout = QHBoxLayout(font_style_container)
-        font_style_layout.setContentsMargins(0, 0, 0, 0)
-        
-        font_style_label = QLabel("字体样式:")
-        font_style_label.setStyleSheet("color: #333; min-width: 80px;")
-        font_style_layout.addWidget(font_style_label)
-        
-        self.font_bold_cb = QCheckBox("加粗")
-        self.font_bold_cb.setChecked(current_font_bold)
-        self.font_bold_cb.stateChanged.connect(self.update_preview)
-        font_style_layout.addWidget(self.font_bold_cb)
-        
-        self.font_italic_cb = QCheckBox("斜体")
-        self.font_italic_cb.setChecked(current_font_italic)
-        self.font_italic_cb.stateChanged.connect(self.update_preview)
-        font_style_layout.addWidget(self.font_italic_cb)
-        
-        self.font_underline_cb = QCheckBox("下划线")
-        self.font_underline_cb.setChecked(current_font_underline)
-        self.font_underline_cb.stateChanged.connect(self.update_preview)
-        font_style_layout.addWidget(self.font_underline_cb)
-        
-        font_style_layout.addStretch()
-        
-        font_layout.addWidget(font_style_container)
-        
-        scroll_layout.addWidget(font_group)
-        
-        # 颜色设置分组
-        color_group = QGroupBox("颜色设置")
-        color_group.setStyleSheet("QGroupBox { font-weight: bold; color: #333; }")
-        color_layout = QVBoxLayout(color_group)
-        
-        # 系统主题跟随选项
-        self.use_system_theme_cb = QCheckBox("跟随系统主题（深色/浅色模式）")
-        self.use_system_theme_cb.setChecked(current_use_system_theme)
-        self.use_system_theme_cb.setToolTip("自动适配系统的深色或浅色主题")
-        self.use_system_theme_cb.stateChanged.connect(self.on_system_theme_toggled)
-        color_layout.addWidget(self.use_system_theme_cb)
-        
-        # 字体颜色设置
-        font_color_container = QWidget()
-        font_color_layout = QHBoxLayout(font_color_container)
-        font_color_layout.setContentsMargins(0, 0, 0, 0)
-        
-        font_color_label = QLabel("字体颜色:")
-        font_color_label.setStyleSheet("color: #333; min-width: 80px;")
-        font_color_layout.addWidget(font_color_label)
-        
-        self.font_color_btn = QPushButton()
-        self.font_color_btn.setFixedSize(80, 30)
-        self.font_color_btn.clicked.connect(self.choose_font_color)
-        self.current_font_color = current_font_color
-        self.update_color_button(self.font_color_btn, self.current_font_color)
-        font_color_layout.addWidget(self.font_color_btn)
-        
-        font_color_layout.addStretch()
-        
-        # 重置为默认黑色按钮
-        reset_font_btn = QPushButton("重置为黑色")
-        reset_font_btn.setFixedSize(80, 30)
-        reset_font_btn.clicked.connect(lambda: self.reset_color('font'))
-        reset_font_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #6c757d;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #5a6268;
-            }
-        """)
-        font_color_layout.addWidget(reset_font_btn)
-        
-        color_layout.addWidget(font_color_container)
-        
-        # 背景颜色设置
-        bg_color_container = QWidget()
-        bg_color_layout = QHBoxLayout(bg_color_container)
-        bg_color_layout.setContentsMargins(0, 0, 0, 0)
-        
-        bg_color_label = QLabel("背景颜色:")
-        bg_color_label.setStyleSheet("color: #333; min-width: 80px;")
-        bg_color_layout.addWidget(bg_color_label)
-        
-        self.bg_color_btn = QPushButton()
-        self.bg_color_btn.setFixedSize(80, 30)
-        self.bg_color_btn.clicked.connect(self.choose_bg_color)
-        self.current_bg_color = current_bg_color
-        self.update_color_button(self.bg_color_btn, self.current_bg_color)
-        bg_color_layout.addWidget(self.bg_color_btn)
-        
-        bg_color_layout.addStretch()
-        
-        # 重置为默认白色按钮
-        reset_bg_btn = QPushButton("重置为白色")
-        reset_bg_btn.setFixedSize(80, 30)
-        reset_bg_btn.clicked.connect(lambda: self.reset_color('bg'))
-        reset_bg_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #6c757d;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #5a6268;
-            }
-        """)
-        bg_color_layout.addWidget(reset_bg_btn)
-        
-        color_layout.addWidget(bg_color_container)
-        
-        scroll_layout.addWidget(color_group)
-        
-        # 预览区域
-        preview_group = QGroupBox("预览效果")
-        preview_group.setStyleSheet("QGroupBox { font-weight: bold; color: #333; }")
-        preview_layout = QVBoxLayout(preview_group)
-        
-        self.preview_text = QLabel("这是字体和背景色的预览效果\n支持中文和English混合显示\n数字123456789")
-        self.preview_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview_text.setMinimumHeight(80)
+        font_form.addRow("字号", self.font_size_spin)
+
+        self.font_bold_cb = QCheckBox("提高文字粗细")
+        self.font_bold_cb.setChecked(self.current_font_bold)
+        font_form.addRow("辅助阅读", self.font_bold_cb)
+        font_layout.addLayout(font_form)
+        controls.addWidget(font_card)
+        controls.addStretch()
+        content.addLayout(controls, 5)
+
+        preview_card, preview_layout = self._card(
+            "实时预览", "预览不会修改主界面，保存后才会应用。"
+        )
+        self.preview_panel = QFrame()
+        self.preview_panel.setObjectName("previewPanel")
+        preview_panel_layout = QVBoxLayout(self.preview_panel)
+        preview_panel_layout.setContentsMargins(20, 22, 20, 22)
+        preview_panel_layout.setSpacing(12)
+        self.preview_title = QLabel("DHI 数据筛选")
+        self.preview_title.setObjectName("previewTitle")
+        preview_panel_layout.addWidget(self.preview_title)
+        self.preview_text = QLabel("中文 English  123456789\n清晰、稳定、易于阅读")
         self.preview_text.setWordWrap(True)
-        self.update_preview()
-        preview_layout.addWidget(self.preview_text)
-        
-        scroll_layout.addWidget(preview_group)
-        
-        scroll.setWidget(scroll_widget)
-        layout.addWidget(scroll)
-        
-        # 按钮区域
+        preview_panel_layout.addWidget(self.preview_text)
+        preview_input = QLineEdit("示例输入内容")
+        preview_input.setReadOnly(True)
+        preview_panel_layout.addWidget(preview_input)
+        preview_button = QPushButton("主要操作")
+        preview_button.setObjectName("previewPrimaryButton")
+        preview_panel_layout.addWidget(preview_button)
+        preview_panel_layout.addStretch()
+        self.preview_summary = QLabel()
+        self.preview_summary.setObjectName("previewSummary")
+        preview_panel_layout.addWidget(self.preview_summary)
+        preview_layout.addWidget(self.preview_panel)
+        content.addWidget(preview_card, 4)
+        layout.addLayout(content, 1)
+
         button_layout = QHBoxLayout()
-        
-        # 恢复默认按钮
-        restore_btn = QPushButton("恢复默认")
+        restore_btn = QPushButton("恢复推荐设置")
+        restore_btn.setObjectName("secondaryButton")
         restore_btn.clicked.connect(self.restore_defaults)
-        restore_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #ffc107;
-                color: #212529;
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #e0a800;
-            }
-        """)
         button_layout.addWidget(restore_btn)
-        
         button_layout.addStretch()
-        
-        # 取消和确定按钮
         cancel_btn = QPushButton("取消")
+        cancel_btn.setObjectName("secondaryButton")
         cancel_btn.clicked.connect(self.reject)
-        cancel_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #6c757d;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-            }
-            QPushButton:hover {
-                background-color: #5a6268;
-            }
-        """)
         button_layout.addWidget(cancel_btn)
-        
-        ok_btn = QPushButton("确定")
+        ok_btn = QPushButton("应用")
+        ok_btn.setObjectName("primaryButton")
         ok_btn.clicked.connect(self.accept)
-        ok_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #007bff;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #0056b3;
-            }
-        """)
         button_layout.addWidget(ok_btn)
-        
         layout.addLayout(button_layout)
-    
-    def update_color_button(self, button, color):
-        """更新颜色按钮的显示"""
-        button.setText(color)
-        button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {color};
-                color: {'white' if self.is_dark_color(color) else 'black'};
-                border: 2px solid #333;
-                border-radius: 4px;
-                font-weight: bold;
-                font-size: 11px;
-            }}
+
+        self.setStyleSheet("""
+            QDialog { background-color: #f5f7fb; color: #1f2937; font-size: 13px; }
+            QLabel#dialogTitle { font-size: 22px; font-weight: 700; color: #111827; }
+            QLabel#dialogSubtitle { color: #667085; margin-bottom: 4px; }
+            QFrame#settingsCard { background: white; border: 1px solid #e4e7ec; border-radius: 10px; }
+            QLabel#cardTitle { font-size: 15px; font-weight: 700; color: #101828; }
+            QLabel#cardDescription { color: #667085; font-size: 12px; }
+            QComboBox, QSpinBox, QLineEdit {
+                min-height: 32px; padding: 2px 10px; color: #1f2937;
+                background: white; border: 1px solid #d0d5dd; border-radius: 6px;
+            }
+            QComboBox:focus, QSpinBox:focus { border: 1px solid #2f80ed; }
+            QCheckBox { color: #344054; spacing: 8px; }
+            QFrame#previewPanel { border: 1px solid #d0d5dd; border-radius: 8px; }
+            QLabel#previewTitle { font-size: 18px; font-weight: 700; }
+            QLabel#previewSummary { color: #667085; font-size: 12px; }
+            QPushButton { min-height: 34px; padding: 0 16px; border-radius: 6px; }
+            QPushButton#primaryButton, QPushButton#previewPrimaryButton {
+                color: white; background: #1677ff; border: 1px solid #1677ff; font-weight: 600;
+            }
+            QPushButton#primaryButton:hover, QPushButton#previewPrimaryButton:hover { background: #0958d9; }
+            QPushButton#secondaryButton { color: #344054; background: white; border: 1px solid #d0d5dd; }
+            QPushButton#secondaryButton:hover { background: #f2f4f7; }
         """)
-    
-    def is_dark_color(self, hex_color):
-        """判断颜色是否为深色"""
-        try:
-            # 移除#号
-            hex_color = hex_color.lstrip('#')
-            # 转换为RGB
-            r = int(hex_color[0:2], 16)
-            g = int(hex_color[2:4], 16)
-            b = int(hex_color[4:6], 16)
-            # 计算亮度
-            brightness = (r * 0.299 + g * 0.587 + b * 0.114)
-            return brightness < 128
-        except:
-            return False
-    
-    def choose_font_color(self):
-        """选择字体颜色"""
-        color = QColorDialog.getColor(QColor(self.current_font_color), self, "选择字体颜色")
-        if color.isValid():
-            color_hex = color.name()
-            
-            # 防呆检查：检测亮度过高的颜色
-            try:
-                hex_color = color_hex.lstrip('#')
-                r = int(hex_color[0:2], 16)
-                g = int(hex_color[2:4], 16)
-                b = int(hex_color[4:6], 16)
-                brightness = (r * 0.299 + g * 0.587 + b * 0.114) / 255
-                
-                if brightness > 0.9:
-                    reply = QMessageBox.question(
-                        self,
-                        "字体颜色过浅提醒",
-                        f"⚠️ 您选择的颜色 {color_hex} 过于浅淡（亮度{brightness:.1%}）！\n\n"
-                        "在白色背景上可能看不清文字。\n\n"
-                        "建议选择深色字体以确保良好的可读性。\n\n"
-                        "是否仍要使用这个颜色？",
-                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                        QMessageBox.StandardButton.No
-                    )
-                    
-                    if reply == QMessageBox.StandardButton.No:
-                        return  # 取消设置，保持原颜色
-            except:
-                pass  # 如果检查失败，继续使用用户选择的颜色
-            
-            self.current_font_color = color_hex
-            self.update_color_button(self.font_color_btn, self.current_font_color)
-            self.update_preview()
-    
-    def choose_bg_color(self):
-        """选择背景颜色"""
-        color = QColorDialog.getColor(QColor(self.current_bg_color), self, "选择背景颜色")
-        if color.isValid():
-            self.current_bg_color = color.name()
-            self.update_color_button(self.bg_color_btn, self.current_bg_color)
-            self.update_preview()
-    
-    def reset_color(self, color_type):
-        """重置颜色为默认值"""
-        if color_type == 'font':
-            self.current_font_color = "#000000"  # 黑色
-            self.update_color_button(self.font_color_btn, self.current_font_color)
-        elif color_type == 'bg':
-            self.current_bg_color = "#ffffff"  # 白色
-            self.update_color_button(self.bg_color_btn, self.current_bg_color)
+
+        self.preset_combo.currentIndexChanged.connect(self._apply_preset)
+        self.scale_combo.currentIndexChanged.connect(self._mark_custom)
+        self.theme_combo.currentIndexChanged.connect(self.update_preview)
+        self.font_family_combo.currentTextChanged.connect(self._mark_custom)
+        self.font_size_spin.valueChanged.connect(self._mark_custom)
+        self.font_bold_cb.stateChanged.connect(self.update_preview)
+        self._select_matching_preset()
         self.update_preview()
-    
+
+    def _select_matching_preset(self):
+        selected = "custom"
+        for preset, values in self.PRESETS.items():
+            if values == (self.get_scale(), self.get_font_size()):
+                selected = preset
+                break
+        self._updating_controls = True
+        self.preset_combo.setCurrentIndex(self.preset_combo.findData(selected))
+        self._updating_controls = False
+
+    def _apply_preset(self, *_args):
+        if self._updating_controls:
+            return
+        preset = self.preset_combo.currentData()
+        if preset in self.PRESETS:
+            self._updating_controls = True
+            scale, font_size = self.PRESETS[preset]
+            self.set_scale(scale)
+            self.font_size_spin.setValue(font_size)
+            self._updating_controls = False
+        self.update_preview()
+
+    def _mark_custom(self, *_args):
+        if not self._updating_controls:
+            self._updating_controls = True
+            self.preset_combo.setCurrentIndex(self.preset_combo.findData("custom"))
+            self._updating_controls = False
+        self.update_preview()
+
     def restore_defaults(self):
-        """恢复所有默认设置"""
-        self.scale_slider.setValue(100)
-        self.current_font_color = "#000000"
-        self.current_bg_color = "#ffffff"
-        self.font_family_combo.setCurrentText("Microsoft YaHei")
+        self._updating_controls = True
+        self.set_scale(100)
+        self.theme_combo.setCurrentIndex(self.theme_combo.findData("system"))
+        self.font_family_combo.setCurrentText(QApplication.font().family())
         self.font_size_spin.setValue(12)
         self.font_bold_cb.setChecked(False)
-        self.font_italic_cb.setChecked(False)
-        self.font_underline_cb.setChecked(False)
-        self.update_color_button(self.font_color_btn, self.current_font_color)
-        self.update_color_button(self.bg_color_btn, self.current_bg_color)
+        self.preset_combo.setCurrentIndex(self.preset_combo.findData("recommended"))
+        self._updating_controls = False
         self.update_preview()
-    
-    def update_preview(self):
-        """更新预览效果"""
-        font_family = self.font_family_combo.currentText()
-        font_size = self.font_size_spin.value()
-        font_weight = "bold" if self.font_bold_cb.isChecked() else "normal"
-        font_style = "italic" if self.font_italic_cb.isChecked() else "normal"
-        text_decoration = "underline" if self.font_underline_cb.isChecked() else "none"
-        
-        self.preview_text.setStyleSheet(f"""
-            color: {self.current_font_color};
-            background-color: {self.current_bg_color};
-            font-family: {font_family};
-            font-size: {font_size}px;
-            font-weight: {font_weight};
-            font-style: {font_style};
-            text-decoration: {text_decoration};
-            padding: 15px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            line-height: 1.5;
-        """)
 
-    def update_scale_label(self, value):
-        """更新缩放标签"""
-        self.scale_label.setText(f"当前缩放: {value}%")
+    def _preview_colors(self):
+        theme = self.theme_combo.currentData()
+        if theme == "system":
+            palette = QApplication.palette()
+            return (
+                palette.color(QPalette.ColorRole.WindowText).name(),
+                palette.color(QPalette.ColorRole.Window).name(),
+                palette.color(QPalette.ColorRole.Base).name(),
+                palette.color(QPalette.ColorRole.Mid).name(),
+            )
+        if theme == "dark":
+            return "#f8fafc", "#111827", "#1f2937", "#475467"
+        return "#101828", "#f8fafc", "#ffffff", "#d0d5dd"
+
+    def update_preview(self, *_args):
+        if not hasattr(self, "preview_panel"):
+            return
+        text, background, surface, border = self._preview_colors()
+        font_family = self.get_font_family()
+        weight = 600 if self.get_font_bold() else 400
+        self.preview_panel.setStyleSheet(f"""
+            QFrame#previewPanel {{ background: {background}; border: 1px solid {border}; border-radius: 8px; }}
+            QLabel {{ color: {text}; background: transparent; font-family: '{font_family}';
+                     font-size: {self.get_font_size()}px; font-weight: {weight}; }}
+            QLabel#previewTitle {{ font-size: {self.get_font_size() + 4}px; font-weight: 700; }}
+            QLabel#previewSummary {{ color: {text}; opacity: 0.8; }}
+            QLineEdit {{ color: {text}; background: {surface}; border: 1px solid {border}; }}
+            QPushButton#previewPrimaryButton {{ color: white; background: #1677ff; border: none; }}
+        """)
+        theme_text = self.theme_combo.currentText()
+        self.preview_summary.setText(
+            f"{theme_text} · {self.get_scale()}% · {self.get_font_size()} px"
+        )
 
     def set_scale(self, value):
-        """设置缩放值"""
-        self.scale_slider.setValue(value)
+        index = self.scale_combo.findData(value)
+        if index < 0:
+            value = min((90, 100, 110, 125), key=lambda item: abs(item - value))
+            index = self.scale_combo.findData(value)
+        self.scale_combo.setCurrentIndex(index)
 
     def get_scale(self):
-        """获取缩放值"""
-        return self.scale_slider.value()
-    
+        return int(self.scale_combo.currentData())
+
     def get_font_color(self):
-        """获取字体颜色"""
-        return self.current_font_color
-    
+        return "#f8fafc" if self.theme_combo.currentData() == "dark" else "#101828"
+
     def get_bg_color(self):
-        """获取背景颜色"""
-        return self.current_bg_color
-    
+        return "#111827" if self.theme_combo.currentData() == "dark" else "#ffffff"
+
     def get_font_family(self):
-        """获取字体类型"""
         return self.font_family_combo.currentText()
-    
+
     def get_font_size(self):
-        """获取字体大小"""
         return self.font_size_spin.value()
-    
+
     def get_font_bold(self):
-        """获取字体加粗"""
         return self.font_bold_cb.isChecked()
-    
+
     def get_font_italic(self):
-        """获取字体斜体"""
-        return self.font_italic_cb.isChecked()
-    
+        return False
+
     def get_font_underline(self):
-        """获取字体下划线"""
-        return self.font_underline_cb.isChecked()
-    
+        return False
+
     def get_use_system_theme(self):
-        """获取系统主题跟随设置"""
-        return self.use_system_theme_cb.isChecked()
-    
-    def on_system_theme_toggled(self, checked):
-        """系统主题选项变化时触发"""
-        self.update_preview()
+        return self.theme_combo.currentData() == "system"
 
     def save_settings(self):
-        """保存设置"""
         scale = self.get_scale()
         font_color = self.get_font_color()
         bg_color = self.get_bg_color()
@@ -581,8 +416,9 @@ class DisplaySettingsDialog(QDialog):
         self.settings.setValue("font_italic", font_italic)
         self.settings.setValue("font_underline", font_underline)
         self.settings.setValue("use_system_theme", self.get_use_system_theme())
+        self.settings.setValue("theme_mode", self.theme_combo.currentData())
         self.settings.sync()
-        
+
         return scale, font_color, bg_color, font_family, font_size, font_bold, font_italic, font_underline
 
 
@@ -1218,7 +1054,9 @@ class MainWindow(QMainWindow):
         
         # 加载显示设置
         self.settings = QSettings("DHI", "ProteinScreening")
-        self.display_scale = self.settings.value("display_scale", 100, type=int)
+        self.display_scale = min(max(
+            self.settings.value("display_scale", 100, type=int), 90
+        ), 125)
         
         # 防呆设计：检查字体颜色是否过浅，自动修正
         raw_font_color = self.settings.value("font_color", "#000000", type=str)
@@ -1226,10 +1064,21 @@ class MainWindow(QMainWindow):
         
         self.background_color = self.settings.value("background_color", "#ffffff", type=str)
         self.font_family = self.settings.value("font_family", "Microsoft YaHei", type=str)
-        self.font_size = self.settings.value("font_size", 12, type=int)
+        self.font_size = min(max(
+            self.settings.value("font_size", 12, type=int), 10
+        ), 16)
         self.font_bold = self.settings.value("font_bold", False, type=bool)
         self.font_italic = self.settings.value("font_italic", False, type=bool)
         self.font_underline = self.settings.value("font_underline", False, type=bool)
+        self.theme_mode = self.settings.value("theme_mode", "system", type=str)
+        if self.theme_mode not in {"system", "light", "dark"}:
+            self.theme_mode = "system"
+
+        # 手动更新相关对象必须保留引用，避免后台线程被提前回收。
+        self.update_check_worker = None
+        self.update_download_worker = None
+        self.update_progress_dialog = None
+        self.pending_update_manifest = None
         
         # 初始化筛选相关变量
         self.added_other_filters = {}  # 存储添加的其他筛选项
@@ -1312,20 +1161,9 @@ class MainWindow(QMainWindow):
             status_bar.showMessage(message)
     
     def get_dpi_scaled_size(self, base_size: int) -> int:
-        """根据系统DPI设置计算适配后的尺寸"""
-        screen_info = self.get_safe_screen_info()
-        
-        # 使用系统缩放比例和用户自定义缩放的组合
-        system_scale = screen_info['scale_factor']
-        user_scale = self.display_scale / 100.0
-        
-        # 最终缩放比例 = 系统缩放 × 用户缩放
-        final_scale = system_scale * user_scale
-        
-        # 应用缩放并确保最小值
-        scaled_size = max(int(base_size * final_scale), base_size // 2)
-        
-        return scaled_size
+        """应用用户缩放；系统 DPI 已由 Qt 自动处理，避免重复放大。"""
+        user_scale = min(max(self.display_scale, 90), 125) / 100.0
+        return max(int(round(base_size * user_scale)), 1)
     
     def get_dpi_scaled_font_size(self, base_font_size: int) -> int:
         """根据系统DPI设置计算适配后的字体大小"""
@@ -1360,8 +1198,10 @@ class MainWindow(QMainWindow):
             return "light"
     
     def get_system_theme_colors(self):
-        """根据系统主题获取适当的颜色"""
-        theme = self.detect_system_theme()
+        """根据用户选择或系统主题获取适当的颜色。"""
+        theme = self.theme_mode
+        if theme == "system":
+            theme = self.detect_system_theme()
         
         if theme == "dark":
             return {
@@ -1387,25 +1227,13 @@ class MainWindow(QMainWindow):
                          }
     
     def apply_consistent_styling(self):
-        """应用统一的字体大小和系统主题跟随样式"""
-        # 检测是否应该使用系统主题
-        use_system_theme = self.settings.value("use_system_theme", True, type=bool)
-        
-        if use_system_theme:
-            # 使用系统主题
-            theme_colors = self.get_system_theme_colors()
-            font_color = theme_colors['text']
-            background_color = theme_colors['input_bg']
-            card_bg = theme_colors['card_bg']
-            border_color = theme_colors['border']
-            accent_color = theme_colors['accent']
-        else:
-            # 使用用户自定义颜色
-            font_color = self.font_color
-            background_color = self.background_color
-            card_bg = "#ffffff"
-            border_color = "#dee2e6"
-            accent_color = "#007bff"
+        """应用统一字体和主题。"""
+        theme_colors = self.get_system_theme_colors()
+        font_color = theme_colors['text']
+        background_color = theme_colors['input_bg']
+        card_bg = theme_colors['card_bg']
+        border_color = theme_colors['border']
+        accent_color = theme_colors['accent']
         
         # 统一的基础字体大小 - 所有控件使用相同大小
         base_font_size = self.get_dpi_scaled_font_size(self.font_size)
@@ -1426,7 +1254,7 @@ class MainWindow(QMainWindow):
             }}
             
             QMainWindow {{
-                background-color: {theme_colors.get('background', '#f8f9fa') if use_system_theme else '#f8f9fa'};
+                background-color: {theme_colors['background']};
                 color: {font_color};
             }}
             
@@ -1437,8 +1265,8 @@ class MainWindow(QMainWindow):
             
             /* 输入控件 */
             QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QDateEdit {{
-                color: black;
-                background-color: white;
+                color: {font_color};
+                background-color: {background_color};
                 border: 1px solid {border_color};
                 padding: 6px;
                 border-radius: 4px;
@@ -1448,13 +1276,13 @@ class MainWindow(QMainWindow):
             QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, 
             QComboBox:focus, QDateEdit:focus {{
                 border: 2px solid {accent_color};
-                color: black;
+                color: {font_color};
             }}
             
             /* 文本显示控件 */
             QLabel {{
-                color: black;
-                background-color: white;
+                color: {font_color};
+                background-color: transparent;
                 text-decoration: {text_decoration};
                 font-weight: bold;
             }}
@@ -1462,14 +1290,14 @@ class MainWindow(QMainWindow):
             /* 按钮 */
             QPushButton {{
                 color: {font_color};
-                background-color: #e9ecef;
+                background-color: {card_bg};
                 border: 1px solid {border_color};
                 padding: 8px 16px;
                 border-radius: 4px;
             }}
             
             QPushButton:hover {{
-                background-color: #dee2e6;
+                background-color: {border_color};
             }}
             
             QPushButton:pressed {{
@@ -1483,8 +1311,8 @@ class MainWindow(QMainWindow):
             
             /* 复选框和单选按钮 */
             QCheckBox, QRadioButton {{
-                color: black;
-                background-color: white;
+                color: {font_color};
+                background-color: transparent;
                 spacing: 6px;
                 font-weight: bold;
             }}
@@ -1494,8 +1322,8 @@ class MainWindow(QMainWindow):
             QCheckBox::indicator, QRadioButton::indicator {{
                 width: {self.get_dpi_scaled_size(16)}px;
                 height: {self.get_dpi_scaled_size(16)}px;
-                background-color: white;
-                border: 2px solid #666666;
+                background-color: {background_color};
+                border: 2px solid {border_color};
             }}
             
             QCheckBox::indicator {{
@@ -1523,15 +1351,15 @@ class MainWindow(QMainWindow):
             
             /* 表格 */
             QTableWidget {{
-                color: black;  /* 强制使用黑色字体 */
-                background-color: white;  /* 强制使用白色背景 */
+                color: {font_color};
+                background-color: {background_color};
                 gridline-color: {border_color};
                 selection-background-color: {accent_color}40;
             }}
             
             QTableWidget::item {{
-                color: black;  /* 强制使用黑色字体 */
-                background-color: white;  /* 强制使用白色背景 */
+                color: {font_color};
+                background-color: {background_color};
                 padding: 4px;
                 border: none;
             }}
@@ -1567,7 +1395,7 @@ class MainWindow(QMainWindow):
                 subcontrol-origin: margin;
                 left: 12px;
                 padding: 0 8px 0 8px;
-                background-color: {theme_colors.get('background', '#f8f9fa') if use_system_theme else '#f8f9fa'};
+                background-color: {theme_colors['background']};
             }}
             
             /* 标签页 */
@@ -1600,7 +1428,7 @@ class MainWindow(QMainWindow):
             
             /* 状态栏 */
             QStatusBar {{
-                background-color: {theme_colors.get('background', '#f8f9fa') if use_system_theme else '#f8f9fa'};
+                background-color: {theme_colors['background']};
                 color: {font_color};
                 border-top: 1px solid {border_color};
                 padding: 4px;
@@ -1608,7 +1436,7 @@ class MainWindow(QMainWindow):
             
             /* 菜单栏 */
             QMenuBar {{
-                background-color: {theme_colors.get('background', '#f8f9fa') if use_system_theme else '#f8f9fa'};
+                background-color: {theme_colors['background']};
                 color: {font_color};
                 border-bottom: 1px solid {border_color};
             }}
@@ -1668,7 +1496,7 @@ class MainWindow(QMainWindow):
             
             # 创建统一的字体对象
             uniform_font = QFont(self.font_family)
-            uniform_font.setPointSize(base_font_size)
+            uniform_font.setPixelSize(base_font_size)
             uniform_font.setBold(self.font_bold)
             uniform_font.setItalic(self.font_italic)
             uniform_font.setUnderline(self.font_underline)
@@ -1860,7 +1688,11 @@ class MainWindow(QMainWindow):
         
         # 创建中央部件
         central_widget = QWidget()
-        central_widget.setStyleSheet(f"background-color: #f8f9fa;")  # 主窗口保持灰色背景
+        central_widget.setObjectName("mainCentralWidget")
+        central_widget.setStyleSheet(
+            f"QWidget#mainCentralWidget {{ background-color: "
+            f"{self.get_system_theme_colors()['background']}; }}"
+        )
         self.setCentralWidget(central_widget)
         
         # 创建主布局
@@ -2043,44 +1875,157 @@ class MainWindow(QMainWindow):
         """显示界面设置对话框"""
         dialog = DisplaySettingsDialog(self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            new_scale, new_font_color, new_bg_color, new_font_family, new_font_size, new_font_bold, new_font_italic, new_font_underline = dialog.save_settings()
-            
-            # 提示用户重启程序
-            msg = QMessageBox(self)
-            msg.setIcon(QMessageBox.Icon.Information)
-            msg.setWindowTitle("设置已保存")
-            msg.setText(f"显示设置已更新")
-            msg.setInformativeText(f"显示比例: {new_scale}%\n字体颜色: {new_font_color}\n背景颜色: {new_bg_color}\n字体类型: {new_font_family}\n字体大小: {new_font_size}px\n字体加粗: {'是' if new_font_bold else '否'}\n字体斜体: {'是' if new_font_italic else '否'}\n下划线: {'是' if new_font_underline else '否'}\n\n建议重启程序以获得最佳显示效果。")
-            
-            restart_btn = msg.addButton("重启程序", QMessageBox.ButtonRole.AcceptRole)
-            later_btn = msg.addButton("稍后重启", QMessageBox.ButtonRole.RejectRole)
-            
-            msg.exec()
-            
-            if msg.clickedButton() == restart_btn:
-                self.restart_application()
-            else:
-                # 即时应用样式更新，无需重启
-                # 重新加载设置
-                self.display_scale = self.settings.value("display_scale", 100, type=int)
-                self.font_color = self.settings.value("font_color", "#000000", type=str)
-                self.background_color = self.settings.value("background_color", "#ffffff", type=str)
-                self.font_family = self.settings.value("font_family", "Microsoft YaHei", type=str)
-                self.font_size = self.settings.value("font_size", 12, type=int)
-                self.font_bold = self.settings.value("font_bold", False, type=bool)
-                self.font_italic = self.settings.value("font_italic", False, type=bool)
-                self.font_underline = self.settings.value("font_underline", False, type=bool)
-                
-                # 应用新的样式
-                self.apply_consistent_styling()
-                
-                # 强制统一所有控件的字体大小
-                QTimer.singleShot(100, self.force_uniform_font_on_all_widgets)
+            old_scale = self.display_scale
+            dialog.save_settings()
+            self.display_scale = self.settings.value("display_scale", 100, type=int)
+            self.font_color = self.settings.value("font_color", "#101828", type=str)
+            self.background_color = self.settings.value("background_color", "#ffffff", type=str)
+            self.font_family = self.settings.value("font_family", QApplication.font().family(), type=str)
+            self.font_size = self.settings.value("font_size", 12, type=int)
+            self.font_bold = self.settings.value("font_bold", False, type=bool)
+            self.font_italic = False
+            self.font_underline = False
+            self.theme_mode = self.settings.value("theme_mode", "system", type=str)
+
+            self.apply_consistent_styling()
+            if self.centralWidget():
+                self.centralWidget().setStyleSheet(
+                    f"QWidget#mainCentralWidget {{ background-color: "
+                    f"{self.get_system_theme_colors()['background']}; }}"
+                )
+            QTimer.singleShot(100, self.force_uniform_font_on_all_widgets)
+
+            if old_scale != self.display_scale:
+                QMessageBox.information(
+                    self,
+                    "设置已应用",
+                    "界面设置已保存。部分固定尺寸区域将在下次启动时完全按新缩放显示。",
+                )
+
+    def check_for_updates(self):
+        """从主界面手动检查更新，作为启动检查之外的补充入口。"""
+        if self.update_check_worker and self.update_check_worker.isRunning():
+            return
+        from update_workers import UpdateCheckWorker
+
+        self.check_update_btn.setEnabled(False)
+        self.check_update_btn.setText("检查中…")
+        self.safe_show_status_message("正在检查新版本…")
+        self.update_check_worker = UpdateCheckWorker(self)
+        self.update_check_worker.completed.connect(self._handle_update_check_result)
+        self.update_check_worker.failed.connect(self._handle_update_check_failed)
+        self.update_check_worker.start()
+
+    def _reset_update_button(self):
+        if hasattr(self, "check_update_btn"):
+            self.check_update_btn.setEnabled(True)
+            self.check_update_btn.setText("检查更新")
+
+    def _handle_update_check_result(self, manifest):
+        self._reset_update_button()
+        if not manifest:
+            from version import get_version
+            self.safe_show_status_message(f"当前已是最新版本 v{get_version()}")
+            QMessageBox.information(
+                self, "检查更新", f"当前已是最新版本 v{get_version()}。"
+            )
+            return
+
+        self.pending_update_manifest = manifest
+        changes = manifest.get("changes") or []
+        change_text = "\n".join(f"• {item}" for item in changes[:8])
+        details = f"发现新版本 v{manifest['version']}。"
+        if change_text:
+            details += f"\n\n更新内容：\n{change_text}"
+
+        if manifest.get("force_update"):
+            QMessageBox.information(
+                self,
+                "必须更新",
+                f"{details}\n\n该版本为必须更新，将立即下载安装包。",
+            )
+            self._download_update(manifest)
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "发现新版本",
+            f"{details}\n\n是否现在更新？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self._download_update(manifest)
+
+    def _handle_update_check_failed(self, message):
+        self._reset_update_button()
+        self.safe_show_status_message("检查更新失败")
+        QMessageBox.warning(self, "检查更新失败", message)
+
+    def _download_update(self, manifest):
+        if self.update_download_worker and self.update_download_worker.isRunning():
+            return
+        from update_workers import UpdateDownloadWorker
+
+        self.pending_update_manifest = manifest
+        self.update_progress_dialog = QProgressDialog(
+            f"正在下载 v{manifest['version']}…", "", 0, 100, self
+        )
+        self.update_progress_dialog.setWindowTitle("下载更新")
+        self.update_progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        self.update_progress_dialog.setCancelButton(None)
+        self.update_progress_dialog.setMinimumDuration(0)
+        self.update_progress_dialog.setValue(0)
+
+        self.update_download_worker = UpdateDownloadWorker(manifest, self)
+        self.update_download_worker.progress.connect(self.update_progress_dialog.setValue)
+        self.update_download_worker.completed.connect(self._handle_update_downloaded)
+        self.update_download_worker.failed.connect(self._handle_update_download_failed)
+        self.update_download_worker.start()
+
+    def _handle_update_downloaded(self, installer_path):
+        if self.update_progress_dialog:
+            self.update_progress_dialog.setValue(100)
+            self.update_progress_dialog.close()
+        try:
+            from pathlib import Path
+            from update_manager import launch_installer
+
+            launch_installer(Path(installer_path))
+            QApplication.quit()
+        except Exception:
+            self._handle_update_download_failed("安装程序无法启动，请重试")
+
+    def _handle_update_download_failed(self, message):
+        if self.update_progress_dialog:
+            self.update_progress_dialog.close()
+        is_forced = bool(
+            self.pending_update_manifest
+            and self.pending_update_manifest.get("force_update")
+        )
+        if not is_forced:
+            QMessageBox.warning(self, "更新失败", message)
+            return
+
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Icon.Critical)
+        msg.setWindowTitle("必须更新")
+        msg.setText(message)
+        msg.setInformativeText("必须完成更新后才能继续使用。")
+        retry_btn = msg.addButton("重试", QMessageBox.ButtonRole.AcceptRole)
+        exit_btn = msg.addButton("退出软件", QMessageBox.ButtonRole.RejectRole)
+        msg.setDefaultButton(retry_btn)
+        msg.exec()
+        if msg.clickedButton() == retry_btn:
+            self._download_update(self.pending_update_manifest)
+        elif msg.clickedButton() == exit_btn:
+            QApplication.quit()
     
     def show_about(self):
         """显示关于对话框"""
+        from version import get_version
         QMessageBox.about(self, "关于DHI筛查助手",
-                          "DHI筛查助手 v3.0\n\n"
+                          f"DHI筛查助手 v{get_version()}\n\n"
                          "伊利液奶奶科院\n"
                          "用于处理DHI报告数据的专业助手\n"
                          "支持批量文件处理和多种筛选条件\n"
@@ -2205,6 +2150,7 @@ class MainWindow(QMainWindow):
             self.settings.setValue("font_italic", False)
             self.settings.setValue("font_underline", False)
             self.settings.setValue("use_system_theme", True)
+            self.settings.setValue("theme_mode", "system")
             
             # 立即应用新设置
             self.display_scale = 100
@@ -2215,6 +2161,7 @@ class MainWindow(QMainWindow):
             self.font_bold = False
             self.font_italic = False
             self.font_underline = False
+            self.theme_mode = "system"
             
             # 重新应用样式
             self.apply_consistent_styling()
@@ -2364,6 +2311,36 @@ class MainWindow(QMainWindow):
         
         layout.addLayout(title_layout)
         layout.addStretch()
+
+        from version import get_version
+        version_label = QLabel(f"v{get_version()}")
+        version_label.setObjectName("versionLabel")
+        version_label.setToolTip("当前软件版本")
+        version_label.setStyleSheet("""
+            color: rgba(255, 255, 255, 0.88);
+            background: transparent;
+            padding: 2px 4px;
+        """)
+        layout.addWidget(version_label)
+
+        self.check_update_btn = QPushButton("检查更新")
+        self.check_update_btn.setObjectName("checkUpdateButton")
+        self.check_update_btn.setToolTip("手动检查并安装最新版本")
+        self.check_update_btn.clicked.connect(self.check_for_updates)
+        self.check_update_btn.setMaximumHeight(26)
+        self.check_update_btn.setStyleSheet("""
+            QPushButton {
+                color: white;
+                background-color: rgba(255, 255, 255, 0.16);
+                border: 1px solid rgba(255, 255, 255, 0.34);
+                border-radius: 4px;
+                padding: 3px 10px;
+                font-weight: 600;
+            }
+            QPushButton:hover { background-color: rgba(255, 255, 255, 0.28); }
+            QPushButton:disabled { color: rgba(255, 255, 255, 0.7); }
+        """)
+        layout.addWidget(self.check_update_btn)
         
         # 用户信息区域
         user_layout = QHBoxLayout()

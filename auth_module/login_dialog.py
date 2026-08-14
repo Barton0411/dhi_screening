@@ -33,7 +33,7 @@ class LoginDialog(QDialog):
         """
         super().__init__(parent)
         self.auth_service = auth_service or AuthService()
-        self.login_type = "local"
+        self.login_type = "yqn"
         self.setWindowTitle("安全登录")
         self.setFixedSize(400, 410)
         
@@ -46,7 +46,7 @@ class LoginDialog(QDialog):
         
         self._setup_ui()
         self._setup_styles()
-        self._load_saved_credentials()
+        self._on_login_type_changed()
         
         # 添加阴影效果
         shadow = QGraphicsDropShadowEffect()
@@ -72,8 +72,8 @@ class LoginDialog(QDialog):
         layout.addWidget(title)
 
         self.login_type_combo = QComboBox()
-        self.login_type_combo.addItem("原账号密码登录", "local")
         self.login_type_combo.addItem("伊起牛登录", "yqn")
+        self.login_type_combo.addItem("原账号密码登录", "local")
         self.login_type_combo.currentIndexChanged.connect(self._on_login_type_changed)
         layout.addWidget(self.login_type_combo)
         
@@ -165,6 +165,15 @@ class LoginDialog(QDialog):
                 background-color: white;
                 outline: none;
             }
+            QComboBox {
+                min-height: 34px;
+                padding: 0 10px;
+                border: 1px solid #d0d5dd;
+                border-radius: 6px;
+                background-color: white;
+                color: #333;
+                font-size: 14px;
+            }
             QLineEdit::placeholder {
                 color: #999;
             }
@@ -232,7 +241,7 @@ class LoginDialog(QDialog):
         
     def _load_saved_credentials(self):
         """加载保存的凭证"""
-        creds = self.auth_service.load_credentials()
+        creds = self.auth_service.load_credentials(self.login_type)
         if creds:
             self.username_input.setText(creds.get("username", ""))
             if creds.get("remember") and creds.get("password"):
@@ -245,14 +254,13 @@ class LoginDialog(QDialog):
         self.login_type = self.login_type_combo.currentData()
         is_local = self.login_type == "local"
         self.register_button.setVisible(is_local)
-        self.remember_checkbox.setVisible(is_local)
+        self.remember_checkbox.setVisible(True)
         self.forgot_password_label.setVisible(is_local)
         self.remember_checkbox.setChecked(False)
         self.password_input.clear()
-        if is_local:
-            self._load_saved_credentials()
-        else:
-            self.username_input.clear()
+        self.username_input.clear()
+        self._load_saved_credentials()
+        if not self.username_input.text():
             self.username_input.setFocus()
     
     def show_waiting(self, message: str = "正在连接服务器..."):
@@ -299,6 +307,7 @@ class LoginDialog(QDialog):
         
         if success:
             password_was_changed = False
+            saved = True
             if self.login_type == "local" and extra and extra.get("must_change_password"):
                 self.hide_waiting()
                 from .change_password_dialog import ChangePasswordDialog
@@ -315,17 +324,28 @@ class LoginDialog(QDialog):
 
             if self.login_type == "local":
                 if password_was_changed:
-                    self.auth_service.save_credentials(
-                        self.auth_service.username, "", False
-                    )
+                    self.auth_service.clear_credentials("local")
                 else:
-                    self.auth_service.save_credentials(
-                        self.auth_service.username,
+                    saved = self.auth_service.save_credentials(
+                        username,
                         password,
                         self.remember_checkbox.isChecked(),
+                        "local",
                     )
             else:
-                self.auth_service.clear_credentials()
+                saved = self.auth_service.save_credentials(
+                    username,
+                    password,
+                    self.remember_checkbox.isChecked(),
+                    "yqn",
+                )
+
+            if self.remember_checkbox.isChecked() and not saved:
+                QMessageBox.warning(
+                    self,
+                    "无法记住密码",
+                    "系统凭据库暂时不可用，本次登录仍然有效，但密码没有保存。",
+                )
             
             # 发送登录成功信号
             self.login_successful.emit(username)

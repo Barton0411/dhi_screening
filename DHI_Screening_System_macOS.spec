@@ -9,7 +9,7 @@ APP_DESCRIPTION = '伊利液奶奶科院 - DHI数据分析与乳房炎监测系�
 
 # 分析配置
 a = Analysis(
-    ['desktop_app.py'],
+    ['fast_start.py'],  # 必须经启动器执行强制更新检查
     pathex=[],
     binaries=[],
     datas=[
@@ -95,6 +95,9 @@ a = Analysis(
         'certifi',
         'cryptography',
         'tabulate',
+        'update_manager',
+        'update_workers',
+        'version',
         
         # Excel处理引擎
         'xlrd',

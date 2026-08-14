@@ -5,11 +5,14 @@ import json
 import os
 import platform
 import re
+import ssl
 import subprocess
 import tempfile
 from pathlib import Path
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
+
+import certifi
 
 from version import get_version
 
@@ -22,6 +25,11 @@ ALLOWED_UPDATE_HOSTS = {"genetic-improve.oss-cn-beijing.aliyuncs.com"}
 MAX_MANIFEST_BYTES = 64 * 1024
 MAX_INSTALLER_BYTES = 500 * 1024 * 1024
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _create_ssl_context() -> ssl.SSLContext:
+    """使用打包内置的 CA，避免 PyInstaller 环境找不到系统证书。"""
+    return ssl.create_default_context(cafile=certifi.where())
 
 
 def parse_version(version: str) -> tuple[int, ...]:
@@ -124,7 +132,9 @@ def fetch_update_manifest(timeout: int = 10) -> dict:
         UPDATE_MANIFEST_URL,
         headers={"Accept": "application/json", "User-Agent": f"dhi-screening/{get_version()}"},
     )
-    with urllib_request.urlopen(request, timeout=timeout) as response:
+    with urllib_request.urlopen(
+        request, timeout=timeout, context=_create_ssl_context()
+    ) as response:
         raw = response.read(MAX_MANIFEST_BYTES + 1)
     if len(raw) > MAX_MANIFEST_BYTES:
         raise ValueError("版本清单过大")
@@ -177,7 +187,9 @@ def download_installer(manifest: dict, progress_callback=None) -> Path:
     downloaded = 0
     digest = hashlib.sha256()
     try:
-        with urllib_request.urlopen(request, timeout=60) as response, partial.open("wb") as output:
+        with urllib_request.urlopen(
+            request, timeout=60, context=_create_ssl_context()
+        ) as response, partial.open("wb") as output:
             while True:
                 chunk = response.read(1024 * 1024)
                 if not chunk:

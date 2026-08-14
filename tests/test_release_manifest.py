@@ -28,6 +28,7 @@ class ReleaseManifestTests(unittest.TestCase):
             )
 
         self.assertEqual(manifest["version"], version)
+        self.assertTrue(manifest["force_update"])
         self.assertEqual(set(manifest["downloads"]), {"windows", "macos"})
         self.assertEqual(len(manifest["downloads"]["windows"]["sha256"]), 64)
         self.assertEqual(len(manifest["downloads"]["macos"]["sha256"]), 64)

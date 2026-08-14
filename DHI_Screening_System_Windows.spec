@@ -94,6 +94,9 @@ a = Analysis(
         'certifi',
         'cryptography',
         'tabulate',
+        'update_manager',
+        'update_workers',
+        'version',
         
         # Excel处理引擎
         'xlrd',

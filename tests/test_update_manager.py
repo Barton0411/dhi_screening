@@ -1,9 +1,17 @@
 import hashlib
+import json
+import ssl
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
-from update_manager import is_newer_version, validate_manifest, verify_file_sha256
+from update_manager import (
+    fetch_update_manifest,
+    is_newer_version,
+    validate_manifest,
+    verify_file_sha256,
+)
 
 
 def sample_manifest(version="4.02.25"):
@@ -59,3 +67,13 @@ class UpdateManagerTests(unittest.TestCase):
             digest = hashlib.sha256(path.read_bytes()).hexdigest()
             self.assertTrue(verify_file_sha256(path, digest))
             self.assertFalse(verify_file_sha256(path, "0" * 64))
+
+    @patch("update_manager.urllib_request.urlopen")
+    def test_manifest_request_uses_explicit_ssl_context(self, urlopen):
+        response = MagicMock()
+        response.read.return_value = json.dumps(sample_manifest()).encode("utf-8")
+        urlopen.return_value.__enter__.return_value = response
+
+        fetch_update_manifest()
+
+        self.assertIsInstance(urlopen.call_args.kwargs["context"], ssl.SSLContext)

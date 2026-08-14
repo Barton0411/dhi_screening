@@ -135,15 +135,6 @@ class SplashWindow(QWidget):
 
 def main():
     """快速启动主函数"""
-    # 如果不需要启动画面，直接运行主程序
-    NO_SPLASH = os.environ.get('NO_SPLASH', 'false').lower() == 'true'
-    
-    if NO_SPLASH:
-        # 直接运行主程序，无启动画面
-        from desktop_app import DHIDesktopApp
-        app = DHIDesktopApp()
-        sys.exit(app.run())
-    
     # 1. 创建应用程序和启动画面（很快）
     app = QApplication(sys.argv)
     
@@ -164,6 +155,7 @@ def main():
     update_check_worker = None
     update_download_worker = None
     update_progress = None
+    active_update_manifest = None
     
     # 2. 延迟导入并启动主程序
     def load_and_start():
@@ -265,7 +257,7 @@ def main():
         QTimer.singleShot(100, load_and_start)
 
     def handle_update_downloaded(installer_path):
-        nonlocal update_progress
+        nonlocal update_progress, active_update_manifest
         from pathlib import Path
         from update_manager import launch_installer
 
@@ -275,20 +267,47 @@ def main():
             launch_installer(Path(installer_path))
             app.quit()
         except Exception:
+            if active_update_manifest and active_update_manifest.get("force_update"):
+                choice = QMessageBox.warning(
+                    None,
+                    "更新失败",
+                    "无法启动安装程序。此版本必须完成更新后才能继续使用。",
+                    QMessageBox.StandardButton.Retry | QMessageBox.StandardButton.Close,
+                    QMessageBox.StandardButton.Retry,
+                )
+                if choice == QMessageBox.StandardButton.Retry:
+                    handle_update_downloaded(installer_path)
+                else:
+                    app.quit()
+                return
             QMessageBox.critical(None, "更新失败", "无法启动安装程序，请稍后重试")
             start_application_after_update_check()
 
     def handle_update_download_failed(message):
-        nonlocal update_progress
+        nonlocal update_progress, active_update_manifest
         if update_progress:
             update_progress.close()
+        if active_update_manifest and active_update_manifest.get("force_update"):
+            choice = QMessageBox.warning(
+                None,
+                "更新失败",
+                f"{message}\n\n此版本必须完成更新后才能继续使用。",
+                QMessageBox.StandardButton.Retry | QMessageBox.StandardButton.Close,
+                QMessageBox.StandardButton.Retry,
+            )
+            if choice == QMessageBox.StandardButton.Retry:
+                download_update(active_update_manifest)
+            else:
+                app.quit()
+            return
         QMessageBox.warning(None, "更新失败", message)
         start_application_after_update_check()
 
     def download_update(manifest):
-        nonlocal update_download_worker, update_progress
+        nonlocal update_download_worker, update_progress, active_update_manifest
         from update_workers import UpdateDownloadWorker
 
+        active_update_manifest = manifest
         update_progress = QProgressDialog("正在下载并校验更新包...", None, 0, 100)
         update_progress.setWindowTitle("软件更新")
         update_progress.setWindowModality(Qt.WindowModality.ApplicationModal)
@@ -309,20 +328,23 @@ def main():
 
         splash.close()
         changes = "\n".join(f"• {item}" for item in manifest.get("changes", []))
-        prompt = (
+        release_summary = (
             f"发现新版本 v{manifest['version']}。\n\n"
-            f"{changes or '包含功能改进和安全更新。'}\n\n"
-            "是否现在下载并安装？"
+            f"{changes or '包含功能改进和安全更新。'}"
         )
         if manifest.get("force_update"):
-            QMessageBox.information(None, "需要更新", prompt.replace("是否现在", "即将"))
+            QMessageBox.information(
+                None,
+                "需要更新",
+                f"{release_summary}\n\n这是必须安装的更新，即将开始下载。",
+            )
             download_update(manifest)
             return
 
         choice = QMessageBox.question(
             None,
             "发现新版本",
-            prompt,
+            f"{release_summary}\n\n是否现在下载并安装？",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes,
         )
@@ -331,6 +353,22 @@ def main():
         else:
             start_application_after_update_check()
 
+    def handle_update_check_failed(_message):
+        splash.close()
+        choice = QMessageBox.warning(
+            None,
+            "无法检查更新",
+            "软件必须联网完成版本检查后才能继续使用。\n"
+            "请检查网络连接，然后重试。",
+            QMessageBox.StandardButton.Retry | QMessageBox.StandardButton.Close,
+            QMessageBox.StandardButton.Retry,
+        )
+        if choice == QMessageBox.StandardButton.Retry:
+            splash.show()
+            QTimer.singleShot(100, begin_update_check)
+        else:
+            app.quit()
+
     def begin_update_check():
         nonlocal update_check_worker
         from update_workers import UpdateCheckWorker
@@ -338,7 +376,7 @@ def main():
         splash.update_loading_text("检查软件更新...")
         update_check_worker = UpdateCheckWorker()
         update_check_worker.completed.connect(handle_update_result)
-        update_check_worker.failed.connect(lambda _message: start_application_after_update_check())
+        update_check_worker.failed.connect(handle_update_check_failed)
         update_check_worker.start()
     
     # 3. 使用定时器延迟加载（让启动画面先显示）

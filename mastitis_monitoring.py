@@ -704,12 +704,24 @@ class MastitisMonitoringCalculator:
             )
             chronic_count = chronic_condition.sum()
             
-            # 分母是当月参测牛头数（重叠牛只）
-            total_current = overlap_count
+            # 分母是当月全部有效DHI参测牛头数。
+            # 两个月的重叠牛只仅用于识别分子中的慢性感染牛，不能用于缩小分母。
+            current_df = self.monthly_data[curr_month]
+            total_current = current_df['somatic_cell_count'].notna().sum()
+
+            if total_current == 0:
+                return {
+                    'value': None,
+                    'formula': f'无法计算 - {curr_month}月DHI数据中无有效体细胞数据',
+                    'numerator': chronic_count,
+                    'denominator': 0,
+                    'overlap_count': overlap_count,
+                    'warning': None
+                }
             
             chronic_proportion = (chronic_count / total_current) * 100
             
-            formula = f'({curr_month}月SCC>{self.scc_threshold} 且 {prev_month}月SCC>{self.scc_threshold}的牛头数({chronic_count})) ÷ ({curr_month}月参测牛头数({total_current}，重叠牛只)) = {chronic_proportion:.1f}%'
+            formula = f'({curr_month}月SCC>{self.scc_threshold} 且 {prev_month}月SCC>{self.scc_threshold}的牛头数({chronic_count})) ÷ ({curr_month}月参测牛头数({total_current})) = {chronic_proportion:.1f}%'
             
             # 检查重叠牛只数量是否太少
             warning = None

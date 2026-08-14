@@ -93,6 +93,8 @@ a = Analysis(
         'requests',
         'certifi',
         'cryptography',
+        'keyring',
+        'keyring.backends.Windows',
         'tabulate',
         'update_manager',
         'update_workers',

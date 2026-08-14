@@ -16,6 +16,12 @@ class PackagingUpdaterTests(unittest.TestCase):
             self.assertIn("['fast_start.py']", spec, spec_name)
             self.assertIn("'update_manager'", spec, spec_name)
             self.assertIn("'update_workers'", spec, spec_name)
+            expected_backend = (
+                "'keyring.backends.Windows'"
+                if "Windows" in spec_name
+                else "'keyring.backends.macOS'"
+            )
+            self.assertIn(expected_backend, spec, spec_name)
 
     def test_release_requires_update(self):
         notes = json.loads(

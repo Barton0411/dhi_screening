@@ -94,6 +94,8 @@ a = Analysis(
         'requests',
         'certifi',
         'cryptography',
+        'keyring',
+        'keyring.backends.macOS',
         'tabulate',
         'update_manager',
         'update_workers',

@@ -13,18 +13,21 @@ from urllib.parse import urlparse
 import requests
 import certifi
 from cryptography.fernet import Fernet, InvalidToken
+import keyring
 
 
 DEFAULT_AUTH_API_BASE_URL = "https://api.genepop.com"
 ALLOWED_AUTH_HOSTS = {"api.genepop.com"}
 YQN_LOGIN_URL = "https://yqnapi.yqndairy.com/auth/login"
 REQUEST_TIMEOUT = (5, 15)
+CREDENTIAL_SERVICE = "DHI Screening Assistant"
+CREDENTIAL_METADATA_VERSION = 1
 
 
 class SimpleAuthService:
     """保持旧界面调用契约的 HTTPS 认证适配器。"""
 
-    def __init__(self, base_url: Optional[str] = None):
+    def __init__(self, base_url: Optional[str] = None, credential_store=None):
         self.base_url = self._validate_base_url(
             base_url or os.environ.get("PROTEIN_SCREENING_AUTH_API_URL", DEFAULT_AUTH_API_BASE_URL)
         )
@@ -43,7 +46,8 @@ class SimpleAuthService:
                 "User-Agent": "dhi-screening-desktop",
             }
         )
-        self.cipher_suite = self._init_cipher()
+        self.credential_store = credential_store or keyring
+        self.cipher_suite = self._init_legacy_cipher()
 
     @staticmethod
     def _validate_base_url(value: str) -> str:
@@ -59,19 +63,16 @@ class SimpleAuthService:
             raise ValueError("认证服务地址无效")
         return value.rstrip("/")
 
-    def _init_cipher(self) -> Fernet:
+    def _init_legacy_cipher(self) -> Optional[Fernet]:
+        """仅用于迁移旧版本地加密文件，不再创建可与密文一同复制的密钥。"""
         key_file = Path.home() / ".protein_screening" / "key.key"
-        key_file.parent.mkdir(parents=True, exist_ok=True)
-        if key_file.exists():
-            key = key_file.read_bytes()
-        else:
-            key = Fernet.generate_key()
-            key_file.write_bytes(key)
-            try:
-                key_file.chmod(0o600)
-            except OSError:
-                pass
-        return Fernet(key)
+        if not key_file.exists():
+            return None
+        try:
+            return Fernet(key_file.read_bytes())
+        except (OSError, ValueError):
+            logging.warning("旧版本地凭据密钥无法读取")
+            return None
 
     def _request(
         self,
@@ -159,7 +160,7 @@ class SimpleAuthService:
     def login_yqn(
         self, username: str, password: str
     ) -> Tuple[bool, str, Optional[Dict]]:
-        """使用伊起牛账号登录，再换取本软件 JWT；不保存伊起牛密码或令牌。"""
+        """使用伊起牛账号登录，再换取本软件 JWT。"""
         yqn_session = requests.Session()
         yqn_session.trust_env = False
         yqn_session.verify = certifi.where()
@@ -256,36 +257,153 @@ class SimpleAuthService:
         self.auth_type = None
         self.must_change_password = False
 
-    def save_credentials(self, username: str, password: str, remember: bool = True):
-        credential_file = Path.home() / ".protein_screening" / "credentials.enc"
-        data = {
-            "username": username,
-            "password": password if remember else "",
-            "remember": remember,
-        }
-        credential_file.write_bytes(
-            self.cipher_suite.encrypt(json.dumps(data).encode("utf-8"))
-        )
-        try:
-            credential_file.chmod(0o600)
-        except OSError:
-            pass
+    @staticmethod
+    def _credential_account(auth_type: str, username: str) -> str:
+        return f"{auth_type}:{username}"
 
-    def load_credentials(self) -> Optional[Dict]:
+    @staticmethod
+    def _credential_metadata_path() -> Path:
+        return Path.home() / ".protein_screening" / "login_preferences.json"
+
+    def _read_credential_metadata(self) -> Optional[Dict]:
+        metadata_path = self._credential_metadata_path()
+        if not metadata_path.exists():
+            return None
+        try:
+            data = json.loads(metadata_path.read_text(encoding="utf-8"))
+            if (
+                isinstance(data, dict)
+                and data.get("version") == CREDENTIAL_METADATA_VERSION
+                and data.get("auth_type") in {"local", "yqn"}
+                and isinstance(data.get("username"), str)
+            ):
+                return data
+        except (OSError, ValueError, json.JSONDecodeError):
+            logging.warning("登录偏好无法读取")
+        return None
+
+    def save_credentials(
+        self,
+        username: str,
+        password: str,
+        remember: bool = True,
+        auth_type: str = "local",
+    ) -> bool:
+        """将密码保存到系统凭据库；磁盘只记录非敏感的登录偏好。"""
+        if auth_type not in {"local", "yqn"} or not username:
+            return False
+        self.clear_credentials()
+        if not remember:
+            return True
+        try:
+            self.credential_store.set_password(
+                CREDENTIAL_SERVICE,
+                self._credential_account(auth_type, username),
+                password,
+            )
+            metadata_path = self._credential_metadata_path()
+            metadata_path.parent.mkdir(parents=True, exist_ok=True)
+            metadata_path.write_text(
+                json.dumps(
+                    {
+                        "version": CREDENTIAL_METADATA_VERSION,
+                        "auth_type": auth_type,
+                        "username": username,
+                        "remember": True,
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            metadata_path.chmod(0o600)
+            return True
+        except Exception:
+            logging.warning("系统凭据库写入失败")
+            self.clear_credentials()
+            return False
+
+    def _migrate_legacy_credentials(self) -> Optional[Dict]:
         credential_file = Path.home() / ".protein_screening" / "credentials.enc"
-        if not credential_file.exists():
+        if not credential_file.exists() or self.cipher_suite is None:
             return None
         try:
             decrypted = self.cipher_suite.decrypt(credential_file.read_bytes())
             data = json.loads(decrypted.decode("utf-8"))
-            return data if isinstance(data, dict) else None
+            if (
+                isinstance(data, dict)
+                and data.get("remember") is True
+                and data.get("username")
+                and data.get("password")
+                and self.save_credentials(
+                    str(data["username"]),
+                    str(data["password"]),
+                    True,
+                    "local",
+                )
+            ):
+                credential_file.unlink(missing_ok=True)
+                return {
+                    "username": str(data["username"]),
+                    "password": str(data["password"]),
+                    "remember": True,
+                    "auth_type": "local",
+                }
         except (OSError, ValueError, json.JSONDecodeError, InvalidToken):
-            logging.warning("本地登录信息无法读取")
-            return None
+            logging.warning("旧版登录信息无法迁移")
+        return None
 
-    def clear_credentials(self):
-        credential_file = Path.home() / ".protein_screening" / "credentials.enc"
-        credential_file.unlink(missing_ok=True)
+    def load_credentials(self, auth_type: Optional[str] = None) -> Optional[Dict]:
+        metadata = self._read_credential_metadata()
+        if metadata is None:
+            migrated = self._migrate_legacy_credentials()
+            if migrated and (auth_type is None or migrated["auth_type"] == auth_type):
+                return migrated
+            return None
+        if auth_type is not None and metadata["auth_type"] != auth_type:
+            return None
+        try:
+            password = self.credential_store.get_password(
+                CREDENTIAL_SERVICE,
+                self._credential_account(metadata["auth_type"], metadata["username"]),
+            )
+        except Exception:
+            logging.warning("系统凭据库读取失败")
+            return None
+        if not password:
+            return None
+        return {
+            "username": metadata["username"],
+            "password": password,
+            "remember": True,
+            "auth_type": metadata["auth_type"],
+        }
+
+    def clear_credentials(
+        self, auth_type: Optional[str] = None, username: Optional[str] = None
+    ) -> None:
+        metadata = self._read_credential_metadata()
+        target_type = auth_type or (metadata.get("auth_type") if metadata else None)
+        target_username = username or (metadata.get("username") if metadata else None)
+        if target_type and target_username:
+            try:
+                self.credential_store.delete_password(
+                    CREDENTIAL_SERVICE,
+                    self._credential_account(target_type, target_username),
+                )
+            except Exception:
+                pass
+        metadata_path = self._credential_metadata_path()
+        if metadata is None or (
+            (auth_type is None or metadata.get("auth_type") == auth_type)
+            and (username is None or metadata.get("username") == username)
+        ):
+            metadata_path.unlink(missing_ok=True)
+
+        # 旧版密文不再继续使用；清理不影响系统凭据库之外的数据。
+        legacy_file = Path.home() / ".protein_screening" / "credentials.enc"
+        legacy_file.unlink(missing_ok=True)
+        legacy_key = Path.home() / ".protein_screening" / "key.key"
+        legacy_key.unlink(missing_ok=True)
 
     def check_server_health(self) -> bool:
         try:

@@ -12,6 +12,20 @@ SPEC.loader.exec_module(AUTH_MODULE)
 SimpleAuthService = AUTH_MODULE.SimpleAuthService
 
 
+class MemoryCredentialStore:
+    def __init__(self):
+        self.passwords = {}
+
+    def set_password(self, service, account, password):
+        self.passwords[(service, account)] = password
+
+    def get_password(self, service, account):
+        return self.passwords.get((service, account))
+
+    def delete_password(self, service, account):
+        self.passwords.pop((service, account), None)
+
+
 class AuthServiceTests(unittest.TestCase):
     def make_service(self):
         temp_dir = tempfile.TemporaryDirectory()
@@ -20,7 +34,7 @@ class AuthServiceTests(unittest.TestCase):
         patcher = patch("pathlib.Path.home", return_value=home)
         patcher.start()
         self.addCleanup(patcher.stop)
-        return SimpleAuthService()
+        return SimpleAuthService(credential_store=MemoryCredentialStore())
 
     def test_login_stores_token_and_profile(self):
         service = self.make_service()
@@ -109,3 +123,33 @@ class AuthServiceTests(unittest.TestCase):
         self.assertIsNone(service.load_credentials())
         headers = service.session.request.call_args.kwargs["headers"]
         self.assertEqual(headers["Authorization"], "Bearer synthetic-token")
+
+    def test_yqn_password_is_stored_only_in_system_credential_store(self):
+        service = self.make_service()
+
+        saved = service.save_credentials(
+            "test-yqn-user", "synthetic-password", True, "yqn"
+        )
+
+        self.assertTrue(saved)
+        self.assertEqual(
+            service.load_credentials("yqn"),
+            {
+                "username": "test-yqn-user",
+                "password": "synthetic-password",
+                "remember": True,
+                "auth_type": "yqn",
+            },
+        )
+        metadata = service._credential_metadata_path().read_text(encoding="utf-8")
+        self.assertNotIn("synthetic-password", metadata)
+        self.assertFalse(
+            (service._credential_metadata_path().parent / "credentials.enc").exists()
+        )
+
+    def test_credentials_are_scoped_to_login_type(self):
+        service = self.make_service()
+        service.save_credentials("test-yqn-user", "synthetic-password", True, "yqn")
+
+        self.assertIsNone(service.load_credentials("local"))
+        self.assertIsNotNone(service.load_credentials("yqn"))

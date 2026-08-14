@@ -12,11 +12,11 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QProgressDialog,
+    QFrame,
     QVBoxLayout,
     QWidget,
 )
-from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation
-from PyQt6.QtGui import QPixmap, QFont
+from PyQt6.QtCore import Qt, QTimer
 
 class SplashWindow(QWidget):
     """启动画面窗口"""
@@ -25,8 +25,11 @@ class SplashWindow(QWidget):
         self.init_ui()
         
     def init_ui(self):
-        # 窗口设置
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
+        self.setObjectName("splashWindow")
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+        )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
         # 设置窗口图标
@@ -37,95 +40,106 @@ class SplashWindow(QWidget):
         except:
             pass
         
-        # 布局
-        layout = QVBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        
-        # 创建背景
-        background = QLabel()
-        background.setStyleSheet("""
-            QLabel {
-                background-color: white;
-                border-radius: 10px;
-                padding: 30px;
-                border: 1px solid #e0e0e0;
-            }
-        """)
-        
-        # 主布局
-        main_layout = QVBoxLayout(background)
-        
-        # Logo或图标
-        icon_label = QLabel("🥛")
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(1, 1, 1, 1)
+
+        self.card = QFrame()
+        self.card.setObjectName("splashCard")
+        outer_layout.addWidget(self.card)
+
+        main_layout = QVBoxLayout(self.card)
+        main_layout.setContentsMargins(36, 28, 36, 28)
+        main_layout.setSpacing(10)
+
+        icon_label = QLabel("✓")
+        icon_label.setObjectName("splashIcon")
         icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_label.setStyleSheet("font-size: 48px;")
-        main_layout.addWidget(icon_label)
-        
-        # 标题
+        icon_label.setFixedSize(52, 52)
+        main_layout.addWidget(
+            icon_label, 0, Qt.AlignmentFlag.AlignHCenter
+        )
+
         title_label = QLabel("安全登录")
+        title_label.setObjectName("splashTitle")
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title_label.setStyleSheet("""
-            color: #2c3e50;
-            font-size: 24px;
-            font-weight: bold;
-            margin: 10px 0;
-        """)
+        title_label.setMinimumHeight(38)
         main_layout.addWidget(title_label)
-        
-        # 版本信息
+
         from version import get_version
         version_label = QLabel(f"v{get_version()}")
+        version_label.setObjectName("splashVersion")
         version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        version_label.setStyleSheet("""
-            color: #7f8c8d;
-            font-size: 14px;
-        """)
+        version_label.setMinimumHeight(22)
         main_layout.addWidget(version_label)
-        
-        # 加载提示
+
         self.loading_label = QLabel("正在启动...")
+        self.loading_label.setObjectName("splashLoading")
         self.loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.loading_label.setStyleSheet("""
-            color: #34495e;
-            font-size: 12px;
-            margin-top: 20px;
-        """)
+        self.loading_label.setMinimumHeight(28)
+        self.loading_label.setWordWrap(True)
         main_layout.addWidget(self.loading_label)
-        
-        # 添加进度条
+
         self.progress = QProgressBar()
-        self.progress.setStyleSheet("""
-            QProgressBar {
-                border: 1px solid #ddd;
-                border-radius: 3px;
-                text-align: center;
-                height: 6px;
-                background-color: #f5f5f5;
+        self.progress.setObjectName("splashProgress")
+        self.progress.setFixedHeight(8)
+        self.progress.setTextVisible(False)
+        self.progress.setRange(0, 0)
+        main_layout.addWidget(self.progress)
+
+        self.setStyleSheet("""
+            QFrame#splashCard {
+                background-color: #ffffff;
+                border: 1px solid #d9e0e8;
+                border-radius: 14px;
             }
-            QProgressBar::chunk {
-                background-color: #3498db;
-                border-radius: 2px;
+            QLabel#splashIcon {
+                color: #ffffff;
+                background-color: #1677ff;
+                border-radius: 14px;
+                font-size: 28px;
+                font-weight: 700;
+            }
+            QLabel#splashTitle {
+                color: #1d2939;
+                background: transparent;
+                font-size: 24px;
+                font-weight: 700;
+            }
+            QLabel#splashVersion {
+                color: #667085;
+                background: transparent;
+                font-size: 14px;
+            }
+            QLabel#splashLoading {
+                color: #475467;
+                background: transparent;
+                font-size: 13px;
+            }
+            QProgressBar#splashProgress {
+                border: none;
+                border-radius: 4px;
+                background-color: #e8eef6;
+            }
+            QProgressBar#splashProgress::chunk {
+                background-color: #1677ff;
+                border-radius: 4px;
             }
         """)
-        self.progress.setTextVisible(False)
-        self.progress.setRange(0, 0)  # 无限循环模式
-        main_layout.addWidget(self.progress)
-        
-        layout.addWidget(background)
-        self.setLayout(layout)
-        
-        # 设置窗口大小和位置
-        self.resize(300, 200)
+
+        self.setMinimumSize(380, 286)
+        hint = self.sizeHint()
+        self.resize(max(380, hint.width()), max(286, hint.height()))
         self.center()
         
     def center(self):
         """居中显示窗口"""
-        screen = QApplication.primaryScreen().geometry()
-        size = self.geometry()
-        self.move(
-            (screen.width() - size.width()) // 2,
-            (screen.height() - size.height()) // 2
-        )
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return
+        available = screen.availableGeometry()
+        frame = self.frameGeometry()
+        frame.moveCenter(available.center())
+        self.move(frame.topLeft())
         
     def update_loading_text(self, text):
         """更新加载提示文本"""
